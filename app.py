@@ -8,6 +8,22 @@ from datetime import datetime
 from Bio import Entrez
 import streamlit.components.v1 as components
 
+def verifier_acces():
+    if "authentifie" not in st.session_state:
+        st.session_state.authentifie = False
+
+    if not st.session_state.authentifie:
+        st.title("🔒 WT Performance Hub — Accès restreint")
+        mdp_saisi = st.text_input("Mot de passe équipe :", type="password")
+        if st.button("Se connecter"):
+            if mdp_saisi == st.secrets.get("APP_PASSWORD", ""):
+                st.session_state.authentifie = True
+                st.rerun()
+            else:
+                st.error("Mot de passe incorrect.")
+        st.stop()
+
+verifier_acces()
 # --- CONFIGURATION INITIALE ---
 st.set_page_config(page_title="WT Performance Hub", layout="wide", initial_sidebar_state="expanded")
 
