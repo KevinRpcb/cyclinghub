@@ -76,7 +76,7 @@ def analyser_vfc_dynamique(metriques):
             return f"🚨 VFC basse ({vfc} ms) ET perte d'efficacité (Dérive : {decouplage}%).\n\n**Analyse :** Fatigue systémique. Bloc d'assimilation urgent."
     return f"✅ VFC dans la norme ({vfc} ms). Assimilation validée."
 
-def appeler_openrouter(prompt, modele="anthropic/claude-3.5-sonnet"):
+def appeler_openrouter(prompt, modele="meta-llama/llama-3.3-70b-instruct:free"):
     if not OPENROUTER_API_KEY:
         return "Clé OpenRouter non configurée dans les Secrets Streamlit."
     headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
