@@ -193,6 +193,7 @@ class VektaClient:
         self.api_key = vekta_key()
         self.base_url = vekta_base_url().rstrip("/")
         self.last_error = None
+        self.notice = None
         self._session = requests.Session()
         if self.api_key:
             self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
@@ -229,6 +230,8 @@ class VektaClient:
         except Exception:
             pass
         detail = f" ({code})" if code else ""
+        if r.status_code == 401:
+            raise RuntimeError("clé Vekta refusée (401) — vérifie VEKTA_API_KEY dans les Secrets")
         if r.status_code == 404:
             raise LookupError(f"introuvable dans Vekta (404){detail}")
         if r.status_code == 403:
@@ -246,12 +249,37 @@ class VektaClient:
         return ((today - pd.Timedelta(days=days - 1)).strftime("%Y-%m-%d"),
                 today.strftime("%Y-%m-%d"))
 
+    def _self_rider(self):
+        """Profil 'me' (ton propre compte Vekta), utilisable quand la liste d'athlètes est vide."""
+        try:
+            prof = self._get("/users/me")
+            mapped = _map_athlete(prof if isinstance(prof, dict) else {})
+            if not mapped.get("id"):
+                return None
+            mapped["id"] = "me"
+            mapped["role"] = "Moi (ton compte Vekta)"
+            lm = _extract_latest_metrics(prof)
+            if lm.get("cp"):
+                mapped["power_profile"] = _profile_from_cp(
+                    lm["cp"], lm.get("wprime"), lm.get("maxpower"))
+            return mapped
+        except Exception:
+            return None
+
     def get_athletes(self) -> list:
         try:
             riders = [_map_athlete(u) for u in self._list("/users")]
             riders = [r for r in riders if r.get("id")]
             if not riders:
-                raise RuntimeError("aucun athlète abonné lisible dans Vekta")
+                me = self._self_rider()
+                if me:
+                    self.athletes = [me]
+                    self.notice = ("Clé Vekta valide, mais aucun athlète abonné dans tes "
+                                   "workspaces — tes propres données sont affichées. Un "
+                                   "coureur n'apparaît que s'il a un abonnement Vekta actif.")
+                    return self.athletes
+                raise RuntimeError("clé Vekta valide mais liste d'athlètes vide, et ton "
+                                   "propre compte n'a pas d'abonnement Vekta actif")
             self.athletes = riders
             return riders
         except Exception as e:

@@ -14,8 +14,11 @@ st.set_page_config(page_title="Échauffement WU24 — WT Performance Hub", page_
 gate()
 
 client = VektaClient()
+athletes = client.get_athletes()
 if client.last_error:
-    st.warning(f"API Vekta injoignable ({client.last_error}) — données de démonstration affichées.")
+    st.warning(f"Vekta : {client.last_error} — données de démonstration affichées.")
+elif client.notice:
+    st.info(client.notice)
 
 # ════════════════════════════════════════════════════════════════════════
 # PROTOCOLES (portage fidèle de WU24 · CP)
@@ -244,7 +247,7 @@ if PROTO_ERROR or not PROTOCOLS:
 src = st.sidebar.radio("Source des données", ["Vekta (API)", "Fichier CSV"], key="wu_src")
 riders = []
 if src == "Vekta (API)":
-    for a in client.get_athletes():
+    for a in athletes:
         pp = client.get_power_profile(a["id"])
         riders.append({"name": a.get("name", a["id"]), "team": a.get("team", a.get("role", "Team")),
                        "hrmax": a.get("hrmax", 180), "weight": a.get("weight", 70), **pp})
