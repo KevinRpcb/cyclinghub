@@ -103,6 +103,10 @@ with t1:
     if model:
         st.success(f"CP = **{model['cp']:.0f} W** · W′ = **{model['wprime']/1000:.1f} kJ** "
                    f"(RMSE {model['rmse']:.0f} W sur {len(model['points'])} points)")
+        if model.get("excluded"):
+            ex = ", ".join(f"{round(t/60)}′ @ {p} W" for t, p in model["excluded"])
+            st.caption(f"Efforts écartés du modèle (non maximaux, ils tirait la CP vers "
+                       f"le bas) : {ex}.")
         t_fit = np.logspace(np.log10(20), np.log10(3600), 60)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[p[0] for p in model["points"]],
