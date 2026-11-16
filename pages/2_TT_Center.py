@@ -7,13 +7,26 @@ import streamlit as st
 
 from core.auth import gate
 from core.vekta import VektaClient
+from core.tp import TPClient, session_client
 from core.powermodel import fit_cp_model, target_power, estimate_scx, rho_air, quick_target
 from core.config import get_secret
 
 st.set_page_config(page_title="TT Center — WT Performance Hub", page_icon="⏱️", layout="wide")
 gate()
 
+src = st.sidebar.radio("Source des données", ["Vekta (API)", "TrainingPeaks"], key="tt_src")
 client = VektaClient()
+if src == "TrainingPeaks":
+    tp = session_client()
+    if not tp.configured:
+        st.warning("TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD dans les Secrets "
+                   "Streamlit — Vekta est utilisée en attendant.")
+    else:
+        riders_tp = tp.get_athletes()
+        if riders_tp:
+            client = tp
+        else:
+            st.warning(f"TrainingPeaks : {tp.last_error} — repli sur Vekta.")
 riders = client.get_athletes()
 labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
 rider_id = st.sidebar.selectbox("Coureur", list(labels.keys()), format_func=lambda x: labels[x],
@@ -25,6 +38,10 @@ st.title("⏱️ TT Center — Suivi CLM, PPR, SCx & cibles")
 
 # ── Efforts CLM (Vekta + saisie manuelle, session) ───────────────────────
 efforts = list(client.get_tt_efforts(rider_id))
+if isinstance(client, TPClient) and not efforts:
+    st.caption("Efforts CLM : aucune séance vélo avec puissance trouvée dans "
+               "TrainingPeaks (120 derniers jours). Les efforts saisis à la main "
+               "sont toujours possibles.")
 manual = st.session_state.setdefault("tt_manual", [])
 efforts_all = efforts + manual
 
@@ -105,7 +122,7 @@ with t2:
     s_speed = sc2.number_input("Vitesse (km/h)", 10.0, 70.0, 47.0, step=0.1)
     s_grad = sc3.number_input("Pente (%)", -5.0, 15.0, 0.0, step=0.1)
     s_mass = sc4.number_input("Masse totale (kg)", 40.0, 120.0,
-                              float(athlete["weight"]) + 8.0, step=0.5)
+                              float(athlete.get("weight") or 70.0) + 8.0, step=0.5)
     sc5, sc6, sc7 = st.columns(3)
     s_temp = sc5.number_input("Température (°C)", -10.0, 45.0, 20.0, step=1.0)
     s_press = sc6.number_input("Pression (hPa)", 900.0, 1080.0, 1013.0, step=1.0)
@@ -129,7 +146,8 @@ with t3:
         scx_default = st.session_state.get(f"scx_{rider_id}", 0.22)
         q_scx = st.number_input("SCx (m²)", 0.15, 0.50, float(scx_default), step=0.005)
         rho_q = rho_air(s_temp, s_press)
-        res = quick_target(model, q_dur * 60, athlete["weight"], q_scx, rho_q,
+        res = quick_target(model, q_dur * 60, float(athlete.get("weight") or 70.0),
+                           q_scx, rho_q,
                            gradient_pct=q_grad)
         a, b, c, d = st.columns(4)
         a.metric("Puissance cible", f"{res['watts']} W", f"{res['wkg']} W/kg")
