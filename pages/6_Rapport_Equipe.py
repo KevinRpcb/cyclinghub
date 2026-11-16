@@ -131,10 +131,12 @@ def rider_row(r, days, offset=0):
                 ppr[s] = int(round(near[1]))
 
     ppr_prev = None
+    n_eff_prev = 0
     if hasattr(client, "get_tt_efforts"):
-        ppr_prev = _ppr_from_efforts(
-            safe("efforts saison -1", client.get_tt_efforts,
-                 aid, days=365, offset_days=365 + offset) or [])
+        eff_prev = safe("efforts saison -1", client.get_tt_efforts,
+                        aid, days=365, offset_days=365 + offset) or []
+        n_eff_prev = len(eff_prev)
+        ppr_prev = _ppr_from_efforts(eff_prev)
     ppr_all = _ppr_from_profile(pp)
 
     def vol(dd, oo=0):
@@ -175,7 +177,8 @@ def rider_row(r, days, offset=0):
             "sleep": m.get("sleep_score"),
             "vol": vol_cur, "vol_prev": vol_prev,
             "vol_season": vol_season, "vol_prev_season": vol_prev_season,
-            "model_fit": model_fit, "errors": errs}
+            "model_fit": model_fit, "errors": errs,
+            "n_eff_now": len(efforts), "n_eff_prev": n_eff_prev}
 
 
 def _delta(cur, prev):
@@ -252,6 +255,8 @@ if st.button("📄 Générer le rapport", type="primary"):
                          f'<td><b>{cur}</b></td><td>{prv}</td><td>{allw}</td></tr>')
         ppr_note = ("modèle ajusté sur les efforts de la période" if r["model_fit"]
                     else "profil puissance (all-time)")
+        miss_prev = ("" if r["ppr_prev"]
+                     else " — aucun effort CLM trouvé l'an dernier sur cette fenêtre")
         cards += f'''
 <div class="rider">
   <div class="rider-head">
@@ -268,6 +273,7 @@ if st.button("📄 Générer le rapport", type="primary"):
   <div class="ppr-title">PPR — puissance moyenne maximale ({ppr_note})</div>
   <table class="ppr"><tr><th>Durée</th><th>Période</th><th>Saison -1</th><th>All-time</th></tr>
   {ppr_rows}</table>
+  <div class="ppr-miss">Efforts trouvés — période : {r["n_eff_now"]} · saison -1 : {r["n_eff_prev"]}{miss_prev}</div>
   <div class="comment">{r["comment"]}</div>
 </div>'''
 
@@ -307,6 +313,7 @@ table.ppr th {{ background: #111318; color: #fff; font-size: 9px; padding: 4px;
 table.ppr td {{ border: 1px solid #dde0e8; padding: 5px 8px; text-align: center; font-size: 13px; }}
 table.ppr tr.alt td {{ background: #f8fafc; }}
 table.ppr td.dur {{ font-weight: 700; background: #f4f5f7; font-size: 11px; }}
+.ppr-miss {{ font-size: 9px; color: #7a8194; margin-top: 3px; }}
 .comment {{ margin-top: 6px; font-size: 11px; color: #334155; background: #f8fafc;
            border-left: 3px solid #3b82f6; padding: 6px 10px; }}
 .printbtn {{ position: fixed; top: 12px; right: 12px; background: #111318; color: #fff;
@@ -322,6 +329,16 @@ table.ppr td.dur {{ font-weight: 700; background: #f4f5f7; font-size: 11px; }}
 <b style="font-size:16px">{rdate.strftime("%d/%m/%Y")}</b></div></div>
 {cards}
 </body></html>'''
+    with st.expander("🔍 Diagnostic données du rapport"):
+        for r in rows:
+            st.write(f"**{r['name']}** : efforts période **{r['n_eff_now']}** · "
+                     f"saison -1 **{r['n_eff_prev']}** · PPR période "
+                     f"{'✅' if r['ppr'] else '—'} · all-time "
+                     f"{'✅' if r['ppr_all'] else '—'} · volume "
+                     f"{'✅' if r['vol'] else '—'}")
+        if getattr(client, "last_error", None):
+            st.write(f"Note source : {client.last_error}")
+        st.caption("Photographie ce bloc et envoie-le moi si des colonnes restent vides.")
     components.html(doc, height=1100, scrolling=True)
 
 st.divider()

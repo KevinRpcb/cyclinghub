@@ -161,6 +161,18 @@ with t1:
         st.warning("Aucune donnée puissance pour ce coureur (ni profil, ni effort). "
                    "Ajoute un effort manuellement dans l'onglet ci-dessus ou change de source.")
 
+    with st.expander("🔍 Diagnostic données — montre-moi ce bloc si la courbe manque"):
+        st.write(f"Source : **{type(client).__name__}**"
+                 + (f" — {client.last_error}" if getattr(client, "last_error", None) else ""))
+        st.write(f"Efforts CLM trouvés : **{len(efforts)}** · saisis à la main : **{len(manual)}**")
+        st.write(f"Profil puissance renvoyé par l'API : **{pp if pp else 'VIDE'}**")
+        if model:
+            st.write(f"Modèle CP tracé : source **{model.get('source', 'efforts')}**, "
+                     f"CP {model['cp']:.0f} W, W′ {model['wprime'] / 1000:.1f} kJ, "
+                     f"{len(model['points'])} points.")
+        else:
+            st.write("Modèle CP : **AUCUN** — aucune donnée puissance du tout pour ce coureur.")
+
 with t2:
     st.subheader("Estimation du SCx (S·Cx ≈ CdA) du coureur")
     st.caption("À partir d'un effort stable : puissance, vitesse, pente, conditions. "
