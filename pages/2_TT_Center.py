@@ -231,12 +231,16 @@ with t3:
                     f"**{th}:{tm:02d}:{ts:02d}** à {res['speed_kmh']} km/h.")
 
         durs_min = [1, 3, 5, 10, 20, 60]
+        t_min = t_eff / 60.0
+        d_near = min(durs_min, key=lambda d: abs(d - t_min))
+        st.caption("Repères PPR : ce que le coureur peut tenir à ces durées standard. "
+                   "Ta cible est surlignée en dessous.")
         ref = st.columns(len(durs_min))
         for col, dm in zip(ref, durs_min):
-            col.metric(f"{dm} min", f"{target_power(model, dm * 60):.0f} W")
+            lbl = f"✅ {dm} min" if dm == d_near else f"{dm} min"
+            col.metric(lbl, f"{target_power(model, dm * 60):.0f} W")
         d_lo = min(p[0] for p in model["points"]) / 60.0
         d_hi = max(p[0] for p in model["points"]) / 60.0
-        t_min = (t_eff / 60.0)
         if t_min < d_lo * 0.5 or t_min > d_hi * 2.0:
             st.warning(f"Extrapolation peu fiable : le modèle est ajusté sur des efforts de "
                        f"{d_lo:.1f} à {d_hi:.1f} min, tu demandes {t_min:.1f} min. "
