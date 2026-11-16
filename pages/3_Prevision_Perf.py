@@ -111,10 +111,11 @@ else:
         st.info("En attente d'un fichier de parcours.")
         st.stop()
 
+total_km = segs["dist_m"].sum() / 1000.0
+st.caption(f"🔍 Lecture du fichier : **{len(points)} points** · **{len(segs)} segments** · **{total_km:.1f} km**")
 lats = [p["lat"] for p in points if p["lat"] is not None]
 lons = [p["lon"] for p in points if p["lon"] is not None]
 center = (float(np.mean(lats)), float(np.mean(lons))) if lats else None
-total_km = segs["dist_m"].sum() / 1000.0
 dplus = float(np.clip(segs["gradient_pct"], 0, None).mul(segs["dist_m"], axis=0).sum() / 1000.0)
 
 c1, c2, c3 = st.columns(3)
@@ -252,11 +253,11 @@ def _group_parts(out, n, wind_ms, wind_dir):
 
 
 def _pacing_svg(parts, segs, total_km):
-    W, H = 900, 300
+    W, H = 900, 340
     PL, PR = 16, 16
     cw = W - PL - PR
-    wind_y = 22
-    py, ph = 78, 128
+    wind_y = 24
+    py, ph = 84, 168
     def tx(km):
         return PL + cw * (km / max(total_km, 0.1))
     svg = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">']
@@ -286,19 +287,19 @@ def _pacing_svg(parts, segs, total_km):
             svg.append(f'<line x1="{x1:.1f}" y1="{py}" x2="{x1:.1f}" y2="{py + ph}" '
                        f'stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>')
         cx = (x1 + x2) / 2
-        bw, bh = 112, 56
+        bw, bh = 124, 64
         bx = min(max(cx - bw / 2, PL), PL + cw - bw)
         by = py + 8 if i % 2 == 0 else py + ph - bh - 8
         svg.append(f'<rect x="{bx:.1f}" y="{by}" width="{bw}" height="{bh}" rx="6" '
-                   f'fill="#ffffff" fill-opacity="0.9" stroke="{col}" stroke-width="1.5"/>')
+                   f'fill="#ffffff" fill-opacity="0.92" stroke="{col}" stroke-width="2"/>')
         mm, ss = divmod(int(round(p["time_s"])), 60)
         bcx = bx + bw / 2
-        svg.append(f'<text x="{bcx:.1f}" y="{by + 15}" text-anchor="middle" font-size="10" '
+        svg.append(f'<text x="{bcx:.1f}" y="{by + 17}" text-anchor="middle" font-size="12" '
                    f'font-family="Arial" font-weight="bold" fill="#64748b">'
                    f'P{p["n"]} \u00b7 {p["km_start"]:.0f}\u2013{p["km_end"]:.0f} km</text>')
-        svg.append(f'<text x="{bcx:.1f}" y="{by + 34}" text-anchor="middle" font-size="17" '
+        svg.append(f'<text x="{bcx:.1f}" y="{by + 39}" text-anchor="middle" font-size="19" '
                    f'font-family="Arial" font-weight="900" fill="{col}">{p["watts"]} W</text>')
-        svg.append(f'<text x="{bcx:.1f}" y="{by + 49}" text-anchor="middle" font-size="11" '
+        svg.append(f'<text x="{bcx:.1f}" y="{by + 56}" text-anchor="middle" font-size="12" '
                    f'font-family="Arial" fill="#334155">{mm}:{ss:02d}</text>')
 
         wk = p["wind_kmh"]
