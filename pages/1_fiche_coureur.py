@@ -15,7 +15,9 @@ gate()
 client = VektaClient()
 riders = client.get_athletes()
 if client.last_error:
-    st.warning(f"API Vekta injoignable ({client.last_error}) — données de démonstration affichées.")
+    st.warning(f"Vekta : {client.last_error} — données de démonstration affichées.")
+elif client.notice:
+    st.info(client.notice)
 
 labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
 rider_id = st.sidebar.selectbox("Coureur", list(labels.keys()), format_func=lambda x: labels[x],

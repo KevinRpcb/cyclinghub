@@ -21,7 +21,8 @@ def search(query: str, retmax: int = 8) -> str:
         if not id_list:
             return "Aucun article trouvé pour cette requête."
         handle = Entrez.efetch(db="pubmed", id=",".join(id_list), rettype="abstract", retmode="text")
-        text = handle.read().decode("utf-8", errors="ignore")
+        raw = handle.read()
+        text = raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw)
         return text if text.strip() else "Aucun contenu récupéré."
     except Exception as e:
         return f"Erreur PubMed : {type(e).__name__} — {e}"

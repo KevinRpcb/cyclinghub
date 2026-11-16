@@ -13,9 +13,11 @@ gate()
 st.title("🚴 WT Performance Hub — Vue d'équipe")
 
 client = VektaClient()
-if client.last_error:
-    st.warning(f"API Vekta injoignable ({client.last_error}) — données de démonstration affichées.")
 riders = client.get_athletes()
+if client.last_error:
+    st.warning(f"Vekta : {client.last_error} — données de démonstration affichées.")
+elif client.notice:
+    st.info(client.notice)
 
 rows, alerts = [], []
 for a in riders:
