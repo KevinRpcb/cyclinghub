@@ -258,17 +258,45 @@ else:
             raw = up.getvalue().decode("utf-8-sig")
             sep = ";" if ";" in raw.splitlines()[0] else ","
             df = pd.read_csv(io.StringIO(raw), sep=sep)
-            df.columns = [c.strip().lower() for c in df.columns]
+            df.columns = [str(c).strip().lower() for c in df.columns]
             required = ["name", "hrmax", "weight", "cp"]
             missing = [c for c in required if c not in df.columns]
             if missing:
-                st.error(f"Colonnes manquantes : {', '.join(missing)}")
+                st.error(f"Colonnes manquantes : {', '.join(missing)} — "
+                         f"colonnes trouvées dans ton fichier : {', '.join(df.columns)}")
             else:
+                for c in ("hrmax", "weight", "cp"):
+                    df[c] = pd.to_numeric(df[c], errors="coerce")
+                df = df.dropna(subset=required)
                 riders = df.to_dict("records")
         except Exception as e:
             st.error(f"CSV illisible : {e}")
     else:
         st.info("Glisse ton fichier `database_CP.csv` dans la barre latérale.")
+
+if "wu_manual" not in st.session_state:
+    st.session_state["wu_manual"] = []
+with st.sidebar.expander("➕ Ajouter des coureurs à la main"):
+    st.caption("Utile si Vekta ne liste pas encore tes coureurs ou sans fichier CSV.")
+    with st.form("wu_add_rider", clear_on_submit=True):
+        m_name = st.text_input("Nom")
+        m_cp = st.number_input("CP (W)", 100, 700, 380)
+        m_p10s = st.number_input("P10'' (W, sprint)", 300, 2000, int(m_cp * 2.6))
+        mc1, mc2 = st.columns(2)
+        m_weight = mc1.number_input("Poids (kg)", 40.0, 110.0, 70.0, 0.5)
+        m_hrmax = mc2.number_input("FCmax (bpm)", 150, 220, 185)
+        if st.form_submit_button("Ajouter à la liste") and m_name.strip():
+            st.session_state["wu_manual"].append({
+                "name": m_name.strip(), "team": "Manuel", "cp": int(m_cp),
+                "p10s": int(m_p10s), "weight": float(m_weight), "hrmax": int(m_hrmax)})
+    if st.session_state["wu_manual"]:
+        st.write("**Ajoutés à la main :** " + ", ".join(
+            r["name"] for r in st.session_state["wu_manual"]))
+        if st.button("Vider la liste manuelle"):
+            st.session_state["wu_manual"] = []
+            st.rerun()
+
+riders = riders + [dict(r) for r in st.session_state["wu_manual"]]
 
 if not riders:
     st.stop()
@@ -320,18 +348,23 @@ if "wu_custom_steps" not in st.session_state:
     st.session_state["wu_custom_steps"] = CUSTOM_DEFAULT.copy()
 
 with st.expander("✏️ Éditeur de protocole custom", expanded=proto_id == "custom"):
-    edited = st.data_editor(
-        st.session_state["wu_custom_steps"],
-        columns={
-            "zone": st.column_config.SelectboxColumn("Zone", options=list(ZONE_META.keys()), required=True),
-            "ref": st.column_config.SelectboxColumn("Référence", options=REFS, required=True),
-            "pct": st.column_config.NumberColumn("% réf.", min_value=30, max_value=200, step=1),
-            "reps": st.column_config.NumberColumn("Répétitions", min_value=1, max_value=12, step=1),
-            "work_min": st.column_config.NumberColumn("Travail (min)", min_value=0.1, max_value=15.0, step=0.1),
-            "rec_min": st.column_config.NumberColumn("Récup (min)", min_value=0.0, max_value=5.0, step=0.1),
-            "hr_pct": st.column_config.NumberColumn("% FCmax", min_value=0, max_value=95, step=1),
-        },
-        num_rows="dynamic", use_container_width=True, key="wu_custom_editor")
+    try:
+        edited = st.data_editor(
+            st.session_state["wu_custom_steps"],
+            columns={
+                "zone": st.column_config.SelectboxColumn("Zone", options=list(ZONE_META.keys()), required=True),
+                "ref": st.column_config.SelectboxColumn("Référence", options=REFS, required=True),
+                "pct": st.column_config.NumberColumn("% réf.", min_value=30, max_value=200, step=1),
+                "reps": st.column_config.NumberColumn("Répétitions", min_value=1, max_value=12, step=1),
+                "work_min": st.column_config.NumberColumn("Travail (min)", min_value=0.1, max_value=15.0, step=0.1),
+                "rec_min": st.column_config.NumberColumn("Récup (min)", min_value=0.0, max_value=5.0, step=0.1),
+                "hr_pct": st.column_config.NumberColumn("% FCmax", min_value=0, max_value=95, step=1),
+            },
+            num_rows="dynamic", use_container_width=True)
+    except Exception:
+        st.session_state["wu_custom_steps"] = CUSTOM_DEFAULT.copy()
+        st.warning("Éditeur réinitialisé (état incompatible détecté).")
+        st.rerun()
     st.session_state["wu_custom_steps"] = edited
     ca, cb = st.columns(2)
     if ca.button("↺ Réinitialiser l'éditeur"):
@@ -353,9 +386,11 @@ if proto_id == "custom":
 # COUREURS (slots) + SURCHARGE PAR COUREUR
 # ════════════════════════════════════════════════════════════════════════
 names = [r["name"] for r in riders]
-selected = st.multiselect("Coureurs sélectionnés (max 9)", names,
+if st.session_state.get("wu_selected"):
+    st.session_state["wu_selected"] = [n for n in st.session_state["wu_selected"] if n in names]
+selected = st.multiselect(f"Coureurs sélectionnés ({len(names)} disponibles — max 20)", names,
                           default=st.session_state.get("wu_selected", names[:3]),
-                          max_selections=9, key="wu_selected")
+                          max_selections=20, key="wu_selected")
 if not selected:
     st.info("Sélectionne au moins un coureur.")
     st.stop()
