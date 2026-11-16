@@ -383,7 +383,7 @@ class TPClient:
                 continue
             wtype = w.get("workoutTypeValueId")
             title = str(w.get("title") or "").lower()
-            is_tt = (wtype in BIKE_TYPE_IDS
+            is_tt = ((isinstance(wtype, int) and wtype in BIKE_TYPE_IDS)
                      or any(wd in title for wd in TT_TITLE_WORDS))
             if not is_tt:
                 continue

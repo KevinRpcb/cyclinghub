@@ -97,10 +97,27 @@ def _ppr_from_profile(pp):
 
 def rider_row(r, days, offset=0):
     aid = r["id"]
-    m = client.get_metrics(aid, days=days)
-    pp = client.get_power_profile(aid)
-    efforts = (client.get_tt_efforts(aid, days=days, offset_days=offset)
-               if hasattr(client, "get_tt_efforts") else [])
+    errs = []
+
+    def safe(label, fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except TypeError:
+            try:
+                return fn(*args)
+            except Exception as e2:
+                errs.append(f"{label} : {type(e2).__name__} — {e2}")
+                return None
+        except Exception as e:
+            errs.append(f"{label} : {type(e).__name__} — {e}")
+            return None
+
+    m = safe("métriques", client.get_metrics, aid, days=days) or {}
+    pp = safe("profil puissance", client.get_power_profile, aid) or {}
+    efforts = []
+    if hasattr(client, "get_tt_efforts"):
+        efforts = safe("efforts CLM", client.get_tt_efforts,
+                       aid, days=days, offset_days=offset) or []
     ppr = _ppr_from_efforts(efforts)
     model_fit = bool(ppr)
     if not ppr:
@@ -115,12 +132,15 @@ def rider_row(r, days, offset=0):
 
     ppr_prev = None
     if hasattr(client, "get_tt_efforts"):
-        ppr_prev = _ppr_from_efforts(client.get_tt_efforts(aid, days=365, offset_days=365 + offset))
+        ppr_prev = _ppr_from_efforts(
+            safe("efforts saison -1", client.get_tt_efforts,
+                 aid, days=365, offset_days=365 + offset) or [])
     ppr_all = _ppr_from_profile(pp)
 
     def vol(dd, oo=0):
         if hasattr(client, "get_volume"):
-            return client.get_volume(aid, days=dd, offset_days=oo)
+            return safe(f"volume {dd} j", client.get_volume,
+                        aid, days=dd, offset_days=oo) or {}
         return {}
 
     vol_cur = vol(days, offset)
@@ -155,7 +175,7 @@ def rider_row(r, days, offset=0):
             "sleep": m.get("sleep_score"),
             "vol": vol_cur, "vol_prev": vol_prev,
             "vol_season": vol_season, "vol_prev_season": vol_prev_season,
-            "model_fit": model_fit}
+            "model_fit": model_fit, "errors": errs}
 
 
 def _delta(cur, prev):
@@ -173,6 +193,10 @@ def _fmt_km(v):
 if st.button("📄 Générer le rapport", type="primary"):
     with st.spinner("Collecte des données coureurs…"):
         rows = [rider_row(riders[names.index(n)], days, offset) for n in sel]
+    all_errs = [e for r in rows for e in r["errors"]]
+    if all_errs:
+        st.warning("Certaines données n'ont pas pu être lues — la fiche reste générée : "
+                   + " | ".join(sorted(set(all_errs))))
 
     logo_uri = ""
     if logo_up is not None:
