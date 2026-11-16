@@ -8,7 +8,7 @@ import streamlit as st
 from core.auth import gate
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
-from core.powermodel import (fit_cp_model, target_power, estimate_scx, rho_air,
+from core.powermodel import (robust_cp_model, target_power, estimate_scx, rho_air,
                              quick_target, solve_speed)
 from core.config import get_secret
 
@@ -99,23 +99,16 @@ with t1:
     pts = [(e["duration_s"], e["avg_w"]) for e in efforts_all]
     pts += [(s, pp[k]) for k, s in [("p1m", 60), ("p3m", 180), ("p5m", 300),
                                     ("p10m", 600), ("p20m", 1200)] if pp.get(k)]
-    model = fit_cp_model(pts)
-    if not model and pp.get("cp") and pp.get("p20m"):
-        wprime_fb = (float(pp["p20m"]) - float(pp["cp"])) * 1200.0
-        if wprime_fb > 0:
-            model = {"cp": float(pp["cp"]), "wprime": wprime_fb,
-                     "points": [(s2, pp[k]) for k, s2 in
-                                [("p1m", 60), ("p3m", 180), ("p5m", 300),
-                                 ("p10m", 600), ("p20m", 1200)] if pp.get(k)],
-                     "rmse": 0.0, "excluded": [], "fallback": True}
+    model = robust_cp_model(pts, pp)
     if model:
-        if model.get("fallback"):
-            st.info("Pas assez d'efforts maximaux pour ajuster le modèle CP "
-                    "(il faut au moins 2 efforts de durées différentes). "
-                    "Courbe tracée à partir du profil — ajoute des efforts CLM pour l'affiner.")
-        else:
+        src_lbl = model.get("source", "efforts")
+        if src_lbl == "efforts":
             st.success(f"CP = **{model['cp']:.0f} W** · W′ = **{model['wprime']/1000:.1f} kJ** "
                        f"(RMSE {model['rmse']:.0f} W sur {len(model['points'])} points)")
+        else:
+            st.info(f"Données insuffisantes pour un modèle CP fiable sur les efforts — "
+                    f"courbe tracée à partir du **{src_lbl}**. "
+                    f"Ajoute des efforts CLM maximaux pour l'affiner.")
         if model.get("excluded"):
             ex = ", ".join(f"{round(t/60)}′ @ {p} W" for t, p in model["excluded"])
             st.caption(f"Efforts écartés du modèle (non maximaux, ils tiraient la CP vers "
@@ -165,7 +158,8 @@ with t1:
                 if t_in > 3600:
                     st.warning("Au-delà d'1 h, le modèle extrapole : valeur indicative.")
     else:
-        st.warning("Pas assez d'efforts (>20 s) pour ajuster le modèle CP.")
+        st.warning("Aucune donnée puissance pour ce coureur (ni profil, ni effort). "
+                   "Ajoute un effort manuellement dans l'onglet ci-dessus ou change de source.")
 
 with t2:
     st.subheader("Estimation du SCx (S·Cx ≈ CdA) du coureur")
@@ -173,7 +167,8 @@ with t2:
                "Méthode inverse du modèle aéro/roulement/gravité.")
     base_rho = rho_air(20.0, 1013.0)
     sc1, sc2, sc3, sc4 = st.columns(4)
-    s_power = sc1.number_input("Puissance (W)", 100, 1500, int(pp["p20m"] or pp["cp"]))
+    s_power = sc1.number_input("Puissance (W)", 100, 1500,
+                               int(pp.get("p20m") or pp.get("cp") or 300))
     s_speed = sc2.number_input("Vitesse (km/h)", 10.0, 70.0, 47.0, step=0.1)
     s_grad = sc3.number_input("Pente (%)", -5.0, 15.0, 0.0, step=0.1)
     s_mass = sc4.number_input("Masse totale (kg)", 40.0, 120.0,

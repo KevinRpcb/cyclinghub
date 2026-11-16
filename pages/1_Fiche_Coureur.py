@@ -7,7 +7,7 @@ from core.auth import gate
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
 from core.physiology import compute_pmc, readiness, metric_comments, vfc_verdict
-from core.powermodel import fit_cp_model
+from core.powermodel import robust_cp_model
 from core.openrouter import chat, CURATED_MODELS, DEFAULT_MODEL
 from core.config import openrouter_key
 
@@ -193,11 +193,12 @@ with right:
         if pp.get(key):
             xs.append(sec)
             ys.append(pp[key])
-    if not xs and hasattr(client, "get_tt_efforts"):
-        pp_eff = client.get_tt_efforts(rider_id)
+    if not xs:
+        pp_eff = (client.get_tt_efforts(rider_id)
+                  if hasattr(client, "get_tt_efforts") else [])
         pts = [(e["duration_s"], e["avg_w"]) for e in pp_eff
                if e.get("duration_s") and e.get("avg_w")]
-        mdl = fit_cp_model(pts)
+        mdl = robust_cp_model(pts, pp)
         if mdl:
             xs = [p[0] for p in mdl["points"]]
             ys = [p[1] for p in mdl["points"]]
