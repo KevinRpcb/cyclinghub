@@ -329,15 +329,50 @@ class TPClient:
             self._fallback(e)
         return {}
 
-    def get_tt_efforts(self, athlete_id, days: int = 120) -> list:
+    def get_volume(self, athlete_id, days: int = 30, offset_days: int = 0) -> dict:
+        """Volume brut sur une fenêtre : séances, heures, km, kJ, charge (TSS)."""
+        try:
+            end = date.today() - timedelta(days=offset_days)
+            start = end - timedelta(days=days - 1)
+            data = self._get(f"/fitness/v6/athletes/{athlete_id}/workouts/"
+                             f"{start.strftime('%Y-%m-%d')}/{end.strftime('%Y-%m-%d')}")
+            rows = data if isinstance(data, list) else []
+            sessions = hours = km = kj = tss = 0.0
+            for w in rows:
+                if not isinstance(w, dict):
+                    continue
+                sessions += 1
+                h = _num(w.get("totalTime"))
+                if h:
+                    hours += float(h)
+                d = _num(w.get("distance"))
+                if d:
+                    km += float(d) / 1000.0
+                t = _num(w.get("tssActual"))
+                if t:
+                    tss += float(t)
+                for k, v in w.items():
+                    lk = str(k).lower()
+                    if ("joule" in lk or lk.endswith("kj")) and _num(v) is not None:
+                        kj += float(_num(v))
+                        break
+            return {"sessions": int(sessions), "hours": round(hours, 1),
+                    "km": round(km), "kj": round(kj), "tss": round(tss)}
+        except Exception as e:
+            self._fallback(e)
+            return {}
+
+    def get_tt_efforts(self, athlete_id, days: int = 120, offset_days: int = 0) -> list:
         """Efforts vélo (fenêtre `days` jours) déduits des séances TP : date, durée, puissance.
 
         Un effort est retenu si la séance est de type vélo avec puissance moyenne
         et durée >= 5 min. 'course' si TP la marque Race, sinon 'entrainement'.
         """
         try:
-            start, end = self._date_range(days)
-            rows = self._get(f"/fitness/v6/athletes/{athlete_id}/workouts/{start}/{end}")
+            end = date.today() - timedelta(days=offset_days)
+            start = end - timedelta(days=days - 1)
+            rows = self._get(f"/fitness/v6/athletes/{athlete_id}/workouts/"
+                             f"{start.strftime('%Y-%m-%d')}/{end.strftime('%Y-%m-%d')}")
             rows = rows if isinstance(rows, list) else []
         except Exception as e:
             self._fallback(e)

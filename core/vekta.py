@@ -186,6 +186,41 @@ def _demo_efforts(athlete: dict) -> list:
     return efforts
 
 
+def _volume_from_rows(rows: list) -> dict:
+    sessions = hours = km = kj = tss = 0.0
+    n = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        n += 1
+        dur = _num(_find_key(row, "duration"))
+        if dur:
+            hours += float(dur) / 3600.0
+        dist = _num(_find_key(row, "distance"))
+        if dist:
+            km += float(dist) / 1000.0
+        k = (_num(_find_key(row, "kj")) or _num(_find_key(row, "joule"))
+             or _num(_find_key(row, "energy")))
+        if k:
+            kj += float(k)
+        t = _num(_find_key(row, "tss"))
+        if t:
+            tss += float(t)
+    return {"sessions": n, "hours": round(hours, 1), "km": round(km),
+            "kj": round(kj), "tss": round(tss)}
+
+
+def _demo_volume(athlete: dict, days: int) -> dict:
+    seed = int(hashlib.md5(("vol" + athlete["id"]).encode()).hexdigest()[:8], 16)
+    rng = np.random.default_rng(seed)
+    sessions = max(3, int(round(days * rng.uniform(0.55, 0.85))))
+    hours = round(days * rng.uniform(1.6, 2.6), 1)
+    km = round(hours * rng.uniform(34, 40))
+    kj = round(hours * 3600 * rng.uniform(0.20, 0.28))
+    tss = round(days * rng.uniform(28, 42))
+    return {"sessions": sessions, "hours": hours, "km": km, "kj": kj, "tss": tss}
+
+
 class VektaClient:
     """Client HTTP Vekta. Chaque méthode retombe sur la démo si l'API échoue."""
 
@@ -430,10 +465,28 @@ class VektaClient:
         self.last_error = self.last_error or "Charge Vekta indisponible — données de démonstration"
         return _demo_load(athlete, days)
 
-    def get_tt_efforts(self, athlete_id: str, days: int = 180) -> list:
+    def get_volume(self, athlete_id: str, days: int = 30, offset_days: int = 0) -> dict:
+        """Volume brut sur une fenêtre : séances, heures, km, kJ, charge."""
         try:
-            start, end = self._date_range(days)
-            rows = self._list(f"/users/{athlete_id}/activities", {"from": start, "to": end})
+            end = pd.Timestamp.today().normalize() - pd.Timedelta(days=offset_days)
+            start = end - pd.Timedelta(days=days - 1)
+            rows = self._list(f"/users/{athlete_id}/activities",
+                              {"from": start.strftime("%Y-%m-%d"),
+                               "to": end.strftime("%Y-%m-%d")})
+            if not rows:
+                raise RuntimeError("aucune activité lisible dans Vekta pour la fenêtre")
+            return _volume_from_rows(rows)
+        except Exception as e:
+            self._fallback(e)
+            return _demo_volume(self.get_athlete(athlete_id), days)
+
+    def get_tt_efforts(self, athlete_id: str, days: int = 180, offset_days: int = 0) -> list:
+        try:
+            end = pd.Timestamp.today().normalize() - pd.Timedelta(days=offset_days)
+            start = end - pd.Timedelta(days=days - 1)
+            rows = self._list(f"/users/{athlete_id}/activities",
+                              {"from": start.strftime("%Y-%m-%d"),
+                               "to": end.strftime("%Y-%m-%d")})
         except Exception as e:
             self._fallback(e)
             return _demo_efforts(self.get_athlete(athlete_id))
