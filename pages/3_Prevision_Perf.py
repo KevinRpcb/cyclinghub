@@ -251,55 +251,76 @@ def _group_parts(out, n, wind_ms, wind_dir):
     return parts
 
 
-def _pacing_svg(parts, total_km):
-    W, H = 900, 250
+def _pacing_svg(parts, segs, total_km):
+    W, H = 900, 300
     PL, PR = 16, 16
     cw = W - PL - PR
-    wy, wh = 96, 54
+    wind_y = 22
+    py, ph = 78, 128
     def tx(km):
         return PL + cw * (km / max(total_km, 0.1))
     svg = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">']
-    svg.append(f'<rect x="{PL}" y="{wy}" width="{cw}" height="{wh}" fill="#f8fafc"/>')
+    svg.append(f'<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="5" refY="3.5" '
+               f'orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#64748b"/></marker></defs>')
+
+    d_km = segs["d"].values / 1000.0
+    ele = segs["ele"].values.astype(float)
+    e_lo, e_hi = float(np.nanmin(ele)), float(np.nanmax(ele))
+    span = max(e_hi - e_lo, 20.0)
+    def ty(e):
+        return py + ph - 8 - (ph - 16) * ((e - e_lo) / span)
+    poly = " ".join(f"{tx(k):.1f},{ty(e):.1f}" for k, e in zip(d_km, ele))
+    svg.append(f'<rect x="{PL}" y="{py}" width="{cw}" height="{ph}" fill="#f8fafc"/>')
+    svg.append(f'<polygon points="{tx(0):.1f},{py + ph} {poly} {tx(total_km):.1f},{py + ph}" '
+               f'fill="#dbeafe" stroke="#3b82f6" stroke-width="1.6"/>')
+
     for p in parts:
         x1, x2 = tx(p["km_start"]), tx(p["km_end"])
         col = _grad_color(p["grad"])
-        svg.append(f'<rect x="{x1:.1f}" y="{wy}" width="{max(x2 - x1, 1):.1f}" height="{wh}" '
-                   f'fill="{col}" stroke="#fff" stroke-width="1.5"/>')
+        svg.append(f'<rect x="{x1:.1f}" y="{py + ph - 6}" width="{max(x2 - x1, 1):.1f}" height="6" '
+                   f'fill="{col}"/>')
+        if p["n"] > 1:
+            svg.append(f'<line x1="{x1:.1f}" y1="{py}" x2="{x1:.1f}" y2="{py + ph}" '
+                       f'stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>')
         cx = (x1 + x2) / 2
-        svg.append(f'<text x="{cx:.1f}" y="{wy + 18}" text-anchor="middle" font-size="11" '
-                   f'font-family="Arial" font-weight="bold" fill="#fff">P{p["n"]}</text>')
-        svg.append(f'<text x="{cx:.1f}" y="{wy + 34}" text-anchor="middle" font-size="14" '
-                   f'font-family="Arial" font-weight="900" fill="#fff">{p["watts"]} W</text>')
+        svg.append(f'<text x="{cx:.1f}" y="{py - 46}" text-anchor="middle" font-size="11" '
+                   f'font-family="Arial" font-weight="bold" fill="#334155">'
+                   f'Km {p["km_start"]:.0f}\u2013{p["km_end"]:.0f}</text>')
+        svg.append(f'<text x="{cx:.1f}" y="{py - 30}" text-anchor="middle" font-size="15" '
+                   f'font-family="Arial" font-weight="900" fill="{col}">{p["watts"]} W</text>')
         mm, ss = divmod(int(round(p["time_s"])), 60)
-        svg.append(f'<text x="{cx:.1f}" y="{wy + 48}" text-anchor="middle" font-size="10" '
-                   f'font-family="Arial" fill="#fff">{mm}:{ss:02d}</text>')
+        svg.append(f'<text x="{cx:.1f}" y="{py - 16}" text-anchor="middle" font-size="10" '
+                   f'font-family="Arial" fill="#64748b">{mm}:{ss:02d}</text>')
+
         wk = p["wind_kmh"]
         if abs(wk) >= 1.5:
-            alen = min(46.0, 10.0 + abs(wk) * 1.4)
+            alen = min(56.0, 14.0 + abs(wk) * 1.6)
             headwind = wk > 0
             x_a = cx + (alen / 2 if headwind else -alen / 2)
             x_b = cx - (alen / 2 if headwind else -alen / 2)
             wcol = "#dc2626" if headwind else "#16a34a"
-            svg.append(f'<line x1="{x_a:.1f}" y1="{wy - 26}" x2="{x_b:.1f}" y2="{wy - 26}" '
-                       f'stroke="{wcol}" stroke-width="3" marker-end="url(#ah)"/>')
+            svg.append(f'<line x1="{x_a:.1f}" y1="{wind_y}" x2="{x_b:.1f}" y2="{wind_y}" '
+                       f'stroke="{wcol}" stroke-width="3.5" marker-end="url(#ah)"/>')
             lbl = "face" if headwind else "dos"
-            svg.append(f'<text x="{cx:.1f}" y="{wy - 34}" text-anchor="middle" font-size="10" '
-                       f'font-family="Arial" font-weight="bold" fill="{wcol}">{abs(wk):.0f} km/h {lbl}</text>')
-        g = p["grad"]
-        glbl = f"{g:+.1f} %" if abs(g) >= 0.2 else "~ plat"
-        svg.append(f'<text x="{cx:.1f}" y="{wy + wh + 14}" text-anchor="middle" font-size="10" '
-                   f'font-family="Arial" fill="#64748b">{glbl}</text>')
-        svg.append(f'<text x="{x1:.1f}" y="{wy + wh + 28}" text-anchor="start" font-size="9" '
-                   f'font-family="Arial" fill="#94a3b8">{p["km_start"]:.0f} km</text>')
-    svg.append(f'<text x="{tx(total_km):.1f}" y="{wy + wh + 28}" text-anchor="end" font-size="9" '
-               f'font-family="Arial" fill="#94a3b8">{total_km:.0f} km</text>')
-    svg.append(f'<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="5" refY="3.5" '
-               f'orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#64748b"/></marker></defs>')
+            svg.append(f'<text x="{cx:.1f}" y="{wind_y - 7}" text-anchor="middle" font-size="10" '
+                       f'font-family="Arial" font-weight="bold" fill="{wcol}">{abs(wk):.0f} {lbl}</text>')
+
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        km = total_km * frac
+        svg.append(f'<line x1="{tx(km):.1f}" y1="{py + ph}" x2="{tx(km):.1f}" y2="{py + ph + 4}" '
+                   f'stroke="#94a3b8" stroke-width="1"/>')
+        anchor = "start" if frac == 0.0 else ("end" if frac == 1.0 else "middle")
+        svg.append(f'<text x="{tx(km):.1f}" y="{py + ph + 15}" text-anchor="{anchor}" font-size="9" '
+                   f'font-family="Arial" fill="#94a3b8">{km:.0f} km</text>')
+    svg.append(f'<text x="{PL}" y="{py + 10}" font-size="9" font-family="Arial" fill="#94a3b8">'
+               f'{e_hi:.0f} m</text>')
+    svg.append(f'<text x="{PL}" y="{py + ph - 10}" font-size="9" font-family="Arial" '
+               f'fill="#94a3b8">{e_lo:.0f} m</text>')
     svg.append("</svg>")
     return "".join(svg)
 
 
-def _print_doc(parts, total_km, dplus, race, stage, date_str, logo_uri,
+def _print_doc(parts, segs, total_km, dplus, race, stage, date_str, logo_uri,
                total_time_str, avg_w, wind_lbl):
     rows = "".join(
         f"<tr><td><b>P{p['n']}</b></td><td>{p['km_start']:.0f}–{p['km_end']:.0f} km</td>"
@@ -351,7 +372,7 @@ td {{ padding: 6px 8px; border-bottom: 1px solid #dde0e8; }}
 <div><div class="lbl">Distance</div><div class="val">{total_km:.1f} km · {dplus:.0f} m D+</div></div>
 <div><div class="lbl">Vent</div><div class="val">{wind_lbl}</div></div>
 </div>
-<div class="chart">{_pacing_svg(parts, total_km)}</div>
+<div class="chart">{_pacing_svg(parts, segs, total_km)}</div>
 <table><tr><th>Partie</th><th>Km</th><th>Longueur</th><th>Puissance</th><th>Durée</th>
 <th>Pente</th><th>Vent</th></tr>{rows}</table>
 <div class="note">Vent de face = flèche rouge vers la gauche. Vent de dos = flèche verte
@@ -374,7 +395,7 @@ logo_up = pf.file_uploader("Logo (png/jpg)", type=["png", "jpg", "jpeg"], key="p
 parts = _group_parts(out, n_parts, wind_ms, wind_dir)
 total_time_str = f"{int(h):02d}:{int(mn):02d}:{int(s):02d}"
 wind_lbl = (f"{abs(wind_ms) * 3.6:.0f} km/h" if wind_ms else "non pris en compte")
-doc = _print_doc(parts, total_km, dplus, race_name, stage_name,
+doc = _print_doc(parts, segs, total_km, dplus, race_name, stage_name,
                  race_day.strftime("%d/%m/%Y"), _img_uri(logo_up),
                  total_time_str, result["avg_w"], wind_lbl)
 components.html(doc, height=1050, scrolling=True)
