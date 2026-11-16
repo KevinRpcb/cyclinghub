@@ -55,6 +55,47 @@ def fit_cp_model(points) -> dict:
             "excluded": excluded}
 
 
+def robust_cp_model(points, profile=None) -> dict:
+    """Modèle CP affichable dans tous les cas : efforts + profil, replis successifs.
+
+    Ordre de repli : 1) ajustement sur efforts + profil, 2) ajustement sur le
+    profil seul, 3) CP/W' déduits du profil, 4) estimation grossière sur les
+    points disponibles. Retourne None seulement s'il n'y a aucune donnée.
+    Le dict porte une clé "source" : "efforts", "profil" ou "estimation grossière".
+    """
+    pts = [(float(t), float(p)) for t, p in (points or []) if t and p]
+    prof_pts = []
+    if profile:
+        for k, sec in (("p1m", 60), ("p3m", 180), ("p5m", 300),
+                       ("p10m", 600), ("p20m", 1200)):
+            if profile.get(k):
+                prof_pts.append((sec, float(profile[k])))
+    if pts:
+        model = fit_cp_model(pts + prof_pts)
+        if model:
+            model["source"] = "efforts"
+            return model
+    model = fit_cp_model(prof_pts)
+    if model:
+        model["source"] = "profil"
+        return model
+    if profile and profile.get("cp") and profile.get("p20m"):
+        wprime = (float(profile["p20m"]) - float(profile["cp"])) * 1200.0
+        if wprime > 0:
+            return {"cp": float(profile["cp"]), "wprime": wprime,
+                    "points": prof_pts, "rmse": 0.0, "excluded": [],
+                    "source": "profil"}
+    pool = sorted(set(pts + prof_pts))
+    if pool:
+        pmin = min(p for _, p in pool)
+        tmax, pmax = max(pool, key=lambda x: x[1])
+        wprime = max(1000.0, (pmax - pmin) * max(tmax, 60.0))
+        cp = pmin * 0.9
+        return {"cp": cp, "wprime": wprime, "points": pool, "rmse": 0.0,
+                "excluded": [], "source": "estimation grossière"}
+    return None
+
+
 def target_power(model: dict, seconds: float) -> float:
     """Puissance cible pour une durée donnée (bornée au domaine de validité)."""
     t = max(20.0, min(3600.0, float(seconds)))
