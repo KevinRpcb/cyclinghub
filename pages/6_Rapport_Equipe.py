@@ -49,7 +49,9 @@ def rider_row(r):
     m = client.get_metrics(aid)
     pp = client.get_power_profile(aid)
     efforts = client.get_tt_efforts(aid) if hasattr(client, "get_tt_efforts") else []
-    model = fit_cp_model(efforts) if efforts and len(efforts) >= 2 else None
+    pts = [(e["duration_s"], e["avg_w"]) for e in efforts
+           if e.get("duration_s") and e.get("avg_w")]
+    model = fit_cp_model(pts) if len(pts) >= 2 else None
     ppr = {}
     if model:
         for s in DURS:
