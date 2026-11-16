@@ -45,25 +45,35 @@ def parse_gpx(data: bytes) -> list:
 # ── Parsing FIT ──────────────────────────────────────────────────────────
 def parse_fit(data: bytes) -> list:
     import fitdecode
-    pts = []
-    with fitdecode.FitReader(io.BytesIO(data)) as fit:
-        for frame in fit:
-            if not isinstance(frame, fitdecode.FitDataMessage) or frame.name != "record":
-                continue
 
-            def get(name):
-                try:
-                    return frame.get_value(name)
-                except (KeyError, ValueError):
-                    return None
+    def _read(names):
+        pts = []
+        with fitdecode.FitReader(io.BytesIO(data)) as fit:
+            for frame in fit:
+                if not isinstance(frame, fitdecode.FitDataMessage) \
+                        or frame.name not in names:
+                    continue
 
-            lat, lon = get("position_lat"), get("position_long")
-            if lat is not None:
+                def get(name, _f=frame):
+                    try:
+                        return _f.get_value(name)
+                    except (KeyError, ValueError):
+                        return None
+
+                lat, lon = get("position_lat"), get("position_long")
+                if lat is None or lon is None:
+                    continue
                 lat = lat * 180.0 / 2 ** 31
-            if lon is not None:
                 lon = lon * 180.0 / 2 ** 31
-            ele = get("enhanced_altitude") or get("altitude")
-            pts.append({"lat": lat, "lon": lon, "ele": ele, "time": get("timestamp")})
+                ele = get("enhanced_altitude") or get("altitude")
+                pts.append({"lat": lat, "lon": lon, "ele": ele,
+                            "time": get("timestamp")})
+        return pts
+
+    pts = _read(("record",))
+    alt = _read(("course_point",))
+    if len(alt) > len(pts):
+        pts = alt
     return pts
 
 
