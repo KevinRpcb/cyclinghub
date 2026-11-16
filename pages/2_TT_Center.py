@@ -114,6 +114,39 @@ with t1:
         fig.update_yaxes(title="Puissance (W)")
         fig.update_layout(height=340, template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("**Convertisseur PPR** — puissance ↔ durée")
+        cv1, cv2 = st.columns(2)
+        with cv1:
+            st.caption("Je connais la puissance → durée tenable")
+            cp_w = st.number_input("Puissance (W)", 50, 1500, int(model["cp"] * 1.1),
+                                   key="ppr_w")
+            if cp_w <= model["cp"]:
+                st.info(f"{cp_w} W est sous la CP ({model['cp']:.0f} W) : allure tenable "
+                        f"très longtemps (effort d'endurance, pas d'épuisement du modèle).")
+            else:
+                t_hold = model["wprime"] / (cp_w - model["cp"])
+                hh, rem = divmod(int(round(t_hold)), 3600)
+                mm, ss = divmod(rem, 60)
+                st.success(f"À **{cp_w} W**, le modèle tient **{hh}:{mm:02d}:{ss:02d}** "
+                           f"(épuisement complet de W′).")
+                if t_hold > 3600:
+                    st.warning("Au-delà d'1 h, le modèle extrapole : valeur indicative.")
+        with cv2:
+            st.caption("Je connais la durée → puissance du PPR")
+            ch1, ch2, ch3 = st.columns(3)
+            d_h = ch1.number_input("h", 0, 12, 0, key="ppr_dh")
+            d_m = ch2.number_input("min", 0, 59, 30, key="ppr_dm")
+            d_s = ch3.number_input("s", 0, 59, 0, key="ppr_ds")
+            t_in = d_h * 3600 + d_m * 60 + d_s
+            if t_in < 20:
+                st.info("Entre une durée d'au moins 20 secondes.")
+            else:
+                p_hold = model["cp"] + model["wprime"] / t_in
+                st.success(f"Sur **{d_h}\u2009h {d_m:02d}\u2009min {d_s:02d}\u2009s**, le PPR "
+                           f"donne **{p_hold:.0f} W**.")
+                if t_in > 3600:
+                    st.warning("Au-delà d'1 h, le modèle extrapole : valeur indicative.")
     else:
         st.warning("Pas assez d'efforts (>20 s) pour ajuster le modèle CP.")
 
