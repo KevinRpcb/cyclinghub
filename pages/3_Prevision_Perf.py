@@ -1,3 +1,5 @@
+from datetime import date
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -27,8 +29,12 @@ if src == "TrainingPeaks":
             st.warning(f"TrainingPeaks : {tp.last_error} — repli sur Vekta.")
 riders = client.get_athletes()
 labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
-rider_id = st.sidebar.selectbox("Coureur", list(labels.keys()), format_func=lambda x: labels[x],
+_keys = list(labels.keys())
+_shared = st.session_state.get("rider_id")
+_idx = _keys.index(_shared) if _shared in _keys else 0
+rider_id = st.sidebar.selectbox("Coureur", _keys, index=_idx, format_func=lambda x: labels[x],
                                 key="prev_rider")
+st.session_state["rider_id"] = rider_id
 athlete = client.get_athlete(rider_id)
 pp = client.get_power_profile(rider_id)
 
@@ -37,16 +43,23 @@ st.caption("Glissez un fichier .gpx ou .fit du parcours : modèle aéro/gravité
            "sur les données du coureur, météo gratuite Open-Meteo, stratégie de pacing type BestBikeSplit.")
 
 up = st.file_uploader("Parcours (.gpx / .fit)", type=["gpx", "fit"])
-if not up:
-    st.info("En attente d'un fichier de parcours.")
-    st.stop()
-
-try:
-    points = parse_course(up.getvalue(), up.name)
-    segs = build_segments(points)
-except Exception as e:
-    st.error(f"Fichier illisible : {e}")
-    st.stop()
+if up is not None:
+    try:
+        points = parse_course(up.getvalue(), up.name)
+        segs = build_segments(points)
+        st.session_state["prev_course_cache"] = {"name": up.name, "points": points, "segs": segs}
+    except Exception as e:
+        st.error(f"Fichier illisible : {e}")
+        st.stop()
+else:
+    cache = st.session_state.get("prev_course_cache")
+    if cache:
+        st.info(f"Fichier conservé de ta dernière visite : **{cache['name']}** — "
+                "glisse un autre fichier pour le remplacer.")
+        points, segs = cache["points"], cache["segs"]
+    else:
+        st.info("En attente d'un fichier de parcours.")
+        st.stop()
 
 lats = [p["lat"] for p in points if p["lat"] is not None]
 lons = [p["lon"] for p in points if p["lon"] is not None]
@@ -141,6 +154,175 @@ with st.expander("📋 Plan de pacing détaillé (par segment)"):
     csv = out.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Exporter le plan (CSV pour l'unité de compteur)", csv,
                        f"pacing_{rider_id}_{up.name}.csv", "text/csv")
+
+# ── Plan simple pour le coureur (schéma + document imprimable) ──────────
+def _img_uri(up):
+    if up is None:
+        return ""
+    mime = "image/png" if (up.type or "").endswith("png") else "image/jpeg"
+    return f"data:{mime};base64," + base64.b64encode(up.getvalue()).decode()
+
+
+def _grad_color(g):
+    if g > 4:
+        return "#dc2626"
+    if g > 1.5:
+        return "#f59e0b"
+    if g < -1.5:
+        return "#3b82f6"
+    return "#22c55e"
+
+
+def _group_parts(out, n, wind_ms, wind_dir):
+    total = float(out["dist_m"].sum())
+    edge = max(total / n, 1.0)
+    cum, pids = 0.0, []
+    for d in out["dist_m"].values:
+        pids.append(min(n - 1, int(cum / edge)))
+        cum += d
+    parts = []
+    for pid, sub in out.assign(part=pids).groupby("part"):
+        hws = wind_ms * np.cos(np.radians(wind_dir - sub["bearing_deg"].values))
+        parts.append({
+            "n": pid + 1,
+            "km_start": float(sub["start_km"].iloc[0]),
+            "km_end": float(sub["start_km"].iloc[-1]) + float(sub["dist_m"].iloc[-1]) / 1000.0,
+            "dist_km": float(sub["dist_m"].sum()) / 1000.0,
+            "time_s": float(sub["time_s"].sum()),
+            "watts": int(round(float(np.average(sub["power_w"], weights=sub["time_s"])))),
+            "grad": float(np.average(sub["gradient_pct"], weights=sub["dist_m"])),
+            "wind_kmh": float(np.average(hws, weights=sub["dist_m"])) * 3.6,
+        })
+    return parts
+
+
+def _pacing_svg(parts, total_km):
+    W, H = 900, 250
+    PL, PR = 16, 16
+    cw = W - PL - PR
+    wy, wh = 96, 54
+    def tx(km):
+        return PL + cw * (km / max(total_km, 0.1))
+    svg = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">']
+    svg.append(f'<rect x="{PL}" y="{wy}" width="{cw}" height="{wh}" fill="#f8fafc"/>')
+    for p in parts:
+        x1, x2 = tx(p["km_start"]), tx(p["km_end"])
+        col = _grad_color(p["grad"])
+        svg.append(f'<rect x="{x1:.1f}" y="{wy}" width="{max(x2 - x1, 1):.1f}" height="{wh}" '
+                   f'fill="{col}" stroke="#fff" stroke-width="1.5"/>')
+        cx = (x1 + x2) / 2
+        svg.append(f'<text x="{cx:.1f}" y="{wy + 18}" text-anchor="middle" font-size="11" '
+                   f'font-family="Arial" font-weight="bold" fill="#fff">P{p["n"]}</text>')
+        svg.append(f'<text x="{cx:.1f}" y="{wy + 34}" text-anchor="middle" font-size="14" '
+                   f'font-family="Arial" font-weight="900" fill="#fff">{p["watts"]} W</text>')
+        mm, ss = divmod(int(round(p["time_s"])), 60)
+        svg.append(f'<text x="{cx:.1f}" y="{wy + 48}" text-anchor="middle" font-size="10" '
+                   f'font-family="Arial" fill="#fff">{mm}:{ss:02d}</text>')
+        wk = p["wind_kmh"]
+        if abs(wk) >= 1.5:
+            alen = min(46.0, 10.0 + abs(wk) * 1.4)
+            headwind = wk > 0
+            x_a = cx + (alen / 2 if headwind else -alen / 2)
+            x_b = cx - (alen / 2 if headwind else -alen / 2)
+            wcol = "#dc2626" if headwind else "#16a34a"
+            svg.append(f'<line x1="{x_a:.1f}" y1="{wy - 26}" x2="{x_b:.1f}" y2="{wy - 26}" '
+                       f'stroke="{wcol}" stroke-width="3" marker-end="url(#ah)"/>')
+            lbl = "face" if headwind else "dos"
+            svg.append(f'<text x="{cx:.1f}" y="{wy - 34}" text-anchor="middle" font-size="10" '
+                       f'font-family="Arial" font-weight="bold" fill="{wcol}">{abs(wk):.0f} km/h {lbl}</text>')
+        g = p["grad"]
+        glbl = f"{g:+.1f} %" if abs(g) >= 0.2 else "~ plat"
+        svg.append(f'<text x="{cx:.1f}" y="{wy + wh + 14}" text-anchor="middle" font-size="10" '
+                   f'font-family="Arial" fill="#64748b">{glbl}</text>')
+        svg.append(f'<text x="{x1:.1f}" y="{wy + wh + 28}" text-anchor="start" font-size="9" '
+                   f'font-family="Arial" fill="#94a3b8">{p["km_start"]:.0f} km</text>')
+    svg.append(f'<text x="{tx(total_km):.1f}" y="{wy + wh + 28}" text-anchor="end" font-size="9" '
+               f'font-family="Arial" fill="#94a3b8">{total_km:.0f} km</text>')
+    svg.append(f'<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="5" refY="3.5" '
+               f'orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#64748b"/></marker></defs>')
+    svg.append("</svg>")
+    return "".join(svg)
+
+
+def _print_doc(parts, total_km, dplus, race, stage, date_str, logo_uri,
+               total_time_str, avg_w, wind_lbl):
+    rows = "".join(
+        f"<tr><td><b>P{p['n']}</b></td><td>{p['km_start']:.0f}–{p['km_end']:.0f} km</td>"
+        f"<td>{p['dist_km']:.1f} km</td><td><b>{p['watts']} W</b></td>"
+        f"<td>{divmod(int(round(p['time_s'])), 60)[0]}:{divmod(int(round(p['time_s'])), 60)[1]:02d}</td>"
+        f"<td>{p['grad']:+.1f} %</td><td>{abs(p['wind_kmh']):.0f} km/h "
+        f"{'face' if p['wind_kmh'] > 0 else ('dos' if p['wind_kmh'] < 0 else '—')}</td></tr>"
+        for p in parts)
+    logo = f'<img src="{logo_uri}" style="height:46px;max-width:180px;object-fit:contain">' if logo_uri else \
+           '<div style="font-weight:900;letter-spacing:3px;color:rgba(255,255,255,.5)">LOGO</div>'
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+@page {{ size: A4 portrait; margin: 10mm; }}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: Arial, Helvetica, sans-serif; color: #111318; }}
+.hero {{ background: #111318; color: #fff; padding: 16px 20px; display: flex;
+        align-items: center; gap: 16px; border-radius: 8px 8px 0 0; }}
+.hero h1 {{ font-size: 22px; letter-spacing: 2px; text-transform: uppercase; }}
+.hero .sub {{ font-size: 11px; color: rgba(255,255,255,.6); letter-spacing: 1px;
+             text-transform: uppercase; }}
+.durbox {{ margin-left: auto; text-align: center; background: rgba(255,255,255,.1);
+          padding: 8px 16px; border-radius: 6px; }}
+.durbox b {{ font-size: 20px; }} .durbox span {{ font-size: 10px; color: #f7e982; }}
+.racebar {{ display: flex; gap: 0; border: 1px solid #dde0e8; border-top: none; }}
+.racebar div {{ flex: 1; padding: 7px 10px; border-right: 1px solid #dde0e8; }}
+.racebar div:last-child {{ border-right: none; }}
+.racebar .lbl {{ font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+                color: #7a8194; }}
+.racebar .val {{ font-size: 13px; font-weight: 700; }}
+.chart {{ padding: 18px 6px 6px; }}
+table {{ width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }}
+th {{ background: #f4f5f7; text-transform: uppercase; font-size: 9px; letter-spacing: 1px;
+     color: #7a8194; padding: 6px 8px; text-align: left; }}
+td {{ padding: 6px 8px; border-bottom: 1px solid #dde0e8; }}
+.note {{ margin-top: 12px; font-size: 10px; color: #7a8194; }}
+.printbtn {{ position: fixed; top: 12px; right: 12px; background: #111318; color: #fff;
+            border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold;
+            cursor: pointer; }}
+@media print {{ .printbtn {{ display: none; }} }}
+</style></head><body>
+<button class="printbtn" onclick="window.print()">🖨️ Imprimer / PDF</button>
+<div class="hero">{logo}<div><div class="sub">Plan de course — pacing</div>
+<h1>Stratégie {race or '—'}</h1></div>
+<div class="durbox"><span>Temps estimé</span><br><b>{total_time_str}</b><br>
+<span>{avg_w:.0f} W moyen</span></div></div>
+<div class="racebar">
+<div><div class="lbl">Course</div><div class="val">{race or '—'}</div></div>
+<div><div class="lbl">Étape</div><div class="val">{stage or '—'}</div></div>
+<div><div class="lbl">Date</div><div class="val">{date_str or '—'}</div></div>
+<div><div class="lbl">Distance</div><div class="val">{total_km:.1f} km · {dplus:.0f} m D+</div></div>
+<div><div class="lbl">Vent</div><div class="val">{wind_lbl}</div></div>
+</div>
+<div class="chart">{_pacing_svg(parts, total_km)}</div>
+<table><tr><th>Partie</th><th>Km</th><th>Longueur</th><th>Puissance</th><th>Durée</th>
+<th>Pente</th><th>Vent</th></tr>{rows}</table>
+<div class="note">Vent de face = flèche rouge vers la gauche. Vent de dos = flèche verte
+vers la droite. Couleurs : vert plat · orange montée · rouge forte pente · bleu descente.</div>
+</body></html>"""
+
+
+st.subheader("🚴 Plan simple pour le coureur")
+st.caption("Synthèse lisible : grandes parties, watts, durées et vent. "
+           "Le curseur choisit le nombre de parties. Imprime en PDF et envoie-le à ton coureur.")
+pa, pb, pc = st.columns(3)
+n_parts = pa.slider("Nombre de parties", 2, 15, 6)
+race_name = pb.text_input("Course", key="prev_race")
+stage_name = pc.text_input("Étape / parcours", key="prev_stage")
+pe, pf = st.columns(2)
+default_day = race_date if (use_weather and race_date) else date.today()
+race_day = pe.date_input("Date", value=default_day, key="prev_day")
+logo_up = pf.file_uploader("Logo (png/jpg)", type=["png", "jpg", "jpeg"], key="prev_logo")
+
+parts = _group_parts(out, n_parts, wind_ms, wind_dir)
+total_time_str = f"{int(h):02d}:{int(mn):02d}:{int(s):02d}"
+wind_lbl = (f"{abs(wind_ms) * 3.6:.0f} km/h" if wind_ms else "non pris en compte")
+doc = _print_doc(parts, total_km, dplus, race_name, stage_name,
+                 race_day.strftime("%d/%m/%Y"), _img_uri(logo_up),
+                 total_time_str, result["avg_w"], wind_lbl)
+components.html(doc, height=1050, scrolling=True)
 
 st.caption("Modèle : P = ½·ρ·SCx·v²·v + m·g·(pente + Crr)·v, rendement chaîne inclus. "
            "Le pacing surpondère les sections en montée (sensibilité de la vitesse à la puissance) "

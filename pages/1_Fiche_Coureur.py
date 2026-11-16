@@ -101,7 +101,10 @@ if isinstance(client, VektaClient):
                 pass
 
 labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
-rider_id = st.sidebar.selectbox("Coureur", list(labels.keys()), format_func=lambda x: labels[x],
+_keys = list(labels.keys())
+_shared = st.session_state.get("rider_id")
+_idx = _keys.index(_shared) if _shared in _keys else 0
+rider_id = st.sidebar.selectbox("Coureur", _keys, index=_idx, format_func=lambda x: labels[x],
                                 key="fiche_rider")
 st.session_state["rider_id"] = rider_id
 athlete = client.get_athlete(rider_id)
