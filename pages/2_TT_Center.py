@@ -8,8 +8,8 @@ import streamlit as st
 from core.auth import gate
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
-from core.powermodel import (robust_cp_model, target_power, estimate_scx, rho_air,
-                             quick_target, solve_speed)
+from core.powermodel import (robust_cp_model, fit_cp_model, target_power, estimate_scx,
+                             rho_air, quick_target, solve_speed)
 from core.config import get_secret
 
 st.set_page_config(page_title="TT Center — WT Performance Hub", page_icon="⏱️", layout="wide")
@@ -160,6 +160,44 @@ with t1:
     else:
         st.warning("Aucune donnée puissance pour ce coureur (ni profil, ni effort). "
                    "Ajoute un effort manuellement dans l'onglet ci-dessus ou change de source.")
+
+    with st.expander("📈 Évolution de la CP sur la saison"):
+        dated = [(e.get("date"), float(e["duration_s"]), float(e["avg_w"]))
+                 for e in list(efforts) + list(manual)
+                 if e.get("date") and e.get("duration_s") and e.get("avg_w")]
+        if len(dated) >= 2:
+            dts = pd.to_datetime([d[0] for d in dated])
+            end_all = dts.max()
+            curve = []
+            step = pd.Timedelta(days=30)
+            win = pd.Timedelta(days=60)
+            wend = dts.min() + win
+            while wend <= end_all + step:
+                pts = [(dur, pw) for (dd, dur, pw), dt in zip(dated, dts)
+                       if wend - win < dt <= wend]
+                m = fit_cp_model(pts) if len(pts) >= 2 else None
+                if m:
+                    curve.append((wend, m["cp"]))
+                wend += step
+            if len(curve) >= 2:
+                cdf = pd.DataFrame(curve, columns=["Date", "CP"])
+                figc = go.Figure()
+                figc.add_trace(go.Scatter(x=cdf["Date"], y=cdf["CP"], mode="lines+markers",
+                                          line=dict(color="#2563eb", width=3),
+                                          marker=dict(size=7)))
+                figc.update_layout(template="plotly_white", height=320,
+                                   yaxis_title="CP (W)", hovermode="x unified")
+                st.plotly_chart(figc, use_container_width=True)
+                delta = cdf["CP"].iloc[-1] - cdf["CP"].iloc[0]
+                st.caption(f"CP {cdf['CP'].iloc[0]:.0f} W \u2192 {cdf['CP'].iloc[-1]:.0f} W "
+                           f"sur la période couverte ({delta:+.0f} W). Modèle ajusté "
+                           f"sur une fenêtre glissante de 60 jours.")
+            else:
+                st.info("Pas assez d'efforts CLM datés répartis sur la saison pour "
+                        "tracer une courbe (il en faut au moins 2 dans deux fenêtres "
+                        "de 60 jours différentes).")
+        else:
+            st.info("Pas assez d'efforts CLM datés sur 365 jours pour tracer la courbe.")
 
     with st.expander("🔍 Diagnostic données — montre-moi ce bloc si la courbe manque"):
         st.write(f"Source : **{type(client).__name__}**"
