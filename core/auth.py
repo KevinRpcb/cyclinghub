@@ -27,7 +27,6 @@ def gate():
     """Verrou d'accès : comparaison à temps constant, aucune fuite d'information."""
     if st.session_state.get("auth"):
         return
-    st.set_page_config(page_title="WT Performance Hub", page_icon="🚴", layout="wide")
     st.title("🔒 WT Performance Hub — Accès restreint")
     st.caption("Espace équipe World Tour. Authentification requise.")
     st.text_input("Mot de passe équipe :", type="password", on_change=_check, key="password")

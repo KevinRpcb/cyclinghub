@@ -38,7 +38,7 @@ DEMO_ATHLETES = [
 def _demo_metrics(athlete: dict) -> dict:
     seed = int(hashlib.md5(athlete["id"].encode()).hexdigest()[:8], 16)
     rng = np.random.default_rng(seed)
-    days = pd.date_range(end=datetime.today().normalize(), periods=30)
+    days = pd.date_range(end=pd.Timestamp.today().normalize(), periods=30)
     baseline = {"rider_a": 65, "rider_b": 72, "rider_c": 58}.get(athlete["id"], 65)
     vfc = baseline + np.cumsum(rng.normal(0, 1.2, 30)) * 0.4 + rng.normal(0, 2.2, 30)
     vfc = np.clip(vfc, baseline * 0.55, baseline * 1.25)
@@ -62,7 +62,7 @@ def _demo_metrics(athlete: dict) -> dict:
 def _demo_load(athlete: dict, days: int = 120) -> list:
     seed = int(hashlib.md5(("load" + athlete["id"]).encode()).hexdigest()[:8], 16)
     rng = np.random.default_rng(seed)
-    dates = pd.date_range(end=datetime.today().normalize(), periods=days)
+    dates = pd.date_range(end=pd.Timestamp.today().normalize(), periods=days)
     base = {"rider_a": 70, "rider_b": 78, "rider_c": 55}.get(athlete["id"], 65)
     load = np.clip(rng.normal(base, 32, days) + 12 * (rng.random(days) > 0.82), 0, None)
     return [{"date": d.strftime("%Y-%m-%d"), "load": round(float(v), 1)} for d, v in zip(dates, load)]
