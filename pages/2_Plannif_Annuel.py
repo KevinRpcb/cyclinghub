@@ -1,7 +1,9 @@
+import calendar as cal
 import json
 from datetime import date, timedelta
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import gate
@@ -29,32 +31,157 @@ if src == "TrainingPeaks":
 riders = client.get_athletes()
 labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
 _keys = list(labels.keys())
+
+
+def _weight(rid):
+    a = next((x for x in riders if x["id"] == rid), {})
+    try:
+        return float(a.get("weight") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+st.title("🗓️ Plannif annuel")
+st.caption("Un calendrier par coureur (chacun ses courses et ses blocs). "
+           "Tu planifies, l'IA propose — toi tu décides.")
+
+plan_all = st.session_state.setdefault("plan", {})
+
 _shared = st.session_state.get("rider_id")
-_idx = _keys.index(_shared) if _shared in _keys else 0
-rider_id = st.sidebar.selectbox("Coureur", _keys, index=_idx, format_func=lambda x: labels[x],
-                                key="pl_rider")
-st.session_state["rider_id"] = rider_id
-athlete = client.get_athlete(rider_id)
-rname = athlete.get("name", rider_id)
+_default = [_shared] if _shared in _keys else _keys[:1]
+show_ids = st.sidebar.multiselect("Coureurs affichés au calendrier", _keys,
+                                  default=_default, format_func=lambda x: labels[x],
+                                  key="pl_show")
+edit_id = st.sidebar.selectbox("Coureur à modifier", _keys,
+                               index=_keys.index(_default[0]) if _default else 0,
+                               format_func=lambda x: labels[x], key="pl_edit")
+if show_ids and edit_id not in show_ids:
+    show_ids = [edit_id] + list(show_ids)
+st.session_state["rider_id"] = edit_id
 
-st.title(f"🗓️ Plannif annuel — {rname}")
-st.caption("Tes courses, tes blocs, et un coach IA qui propose — toi tu décides. "
-           "Chaque proposition peut être adoptée, discutée ou supprimée.")
-
-plan = st.session_state.setdefault("plan", {}).setdefault(rider_id, {"races": [], "blocks": []})
-
-t_race, t_bloc, t_ia, t_save = st.tabs(
-    ["🏁 Courses", "🧱 Blocs planifiés", "🤖 Coach IA", "💾 Sauvegarde"])
-
-
-def _rm(table, idx, key):
-    if st.button("🗑️", key=key):
-        del plan[table][idx]
-        st.rerun()
+RIDER_COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2",
+                "#be185d", "#65a30d", "#57534e", "#0f766e"]
+color_of = {rid: RIDER_COLORS[i % len(RIDER_COLORS)] for i, rid in enumerate(show_ids)}
+PRIO_COLORS = {"A": "#dc2626", "B": "#d97706", "C": "#94a3b8"}
+PRIO_SHORT = {"A (objectif)": "A", "B (important)": "B", "C (préparation)": "C"}
 
 
-with t_race:
-    st.subheader("Courses de la saison")
+def plan_for(rid):
+    return plan_all.setdefault(rid, {"races": [], "blocks": []})
+
+
+t_cal, t_edit, t_ia, t_save = st.tabs(
+    ["📅 Calendrier", "✏️ Modifier", "🤖 Coach IA", "💾 Sauvegarde"])
+
+with t_cal:
+    today = date.today()
+    cur = st.session_state.get("cal_month") or (today.year, today.month)
+    nav1, nav2, nav3, nav4 = st.columns([1, 1, 4, 2])
+    if nav1.button("◀", key="cal_prev"):
+        y, mth = cur
+        cur = (y - 1, 12) if mth == 1 else (y, mth - 1)
+        st.session_state["cal_month"] = cur
+    if nav2.button("▶", key="cal_next"):
+        y, mth = cur
+        cur = (y + 1, 1) if mth == 12 else (y, mth + 1)
+        st.session_state["cal_month"] = cur
+    if nav4.button("Aujourd'hui", key="cal_today"):
+        cur = (today.year, today.month)
+        st.session_state["cal_month"] = cur
+    nav3.markdown(f"### {cal.month_name[cur[1]].capitalize()} {cur[0]}")
+    st.session_state["cal_month"] = cur
+
+    if not show_ids:
+        st.info("Choisis au moins un coureur dans la barre de gauche.")
+    else:
+        leg = " · ".join(f'<span style="color:{color_of[rid]}">■</span> '
+                         f'{labels[rid].split(" — ")[0]}' for rid in show_ids)
+        st.markdown(leg, unsafe_allow_html=True)
+
+        y, mth = cur
+        first = date(y, mth, 1)
+        ndays = cal.monthrange(y, mth)[1]
+        off = first.weekday()
+        rows = (off + ndays + 6) // 7
+
+        def day_items(rid, d):
+            items = []
+            p = plan_for(rid)
+            for r in p["races"]:
+                if r["date"] == d.isoformat():
+                    items.append(("race", r["name"],
+                                  PRIO_COLORS.get(PRIO_SHORT.get(r["prio"], "C"), "#94a3b8")))
+            for b in p["blocks"]:
+                if b["start"] <= d.isoformat() <= b["end"]:
+                    items.append(("block", b["label"], color_of[rid]))
+            return items
+
+        hdr = st.columns(7)
+        for i, h in enumerate(["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]):
+            hdr[i].markdown(f'<div style="text-align:center;font-weight:700;font-size:12px;'
+                            f'color:#7a8194">{h}</div>', unsafe_allow_html=True)
+        for w in range(rows):
+            cols = st.columns(7)
+            for dow in range(7):
+                dnum = w * 7 + dow - off + 1
+                if dnum < 1 or dnum > ndays:
+                    continue
+                d = date(y, mth, dnum)
+                chips = ""
+                for rid in show_ids:
+                    for kind, label, col in day_items(rid, d):
+                        nm = labels[rid].split(" — ")[0]
+                        short = label if len(label) <= 14 else label[:13] + "…"
+                        bg = col if kind == "block" else "transparent"
+                        chips += (f'<div style="background:{bg};border:1px solid {col};'
+                                  f'border-radius:3px;padding:1px 4px;font-size:10px;'
+                                  f'margin-top:2px;color:{("#fff" if kind == "block" else col)}">'
+                                  f'{"🏁 " if kind == "race" else ""}{short}'
+                                  f'<span style="opacity:.6"> · {nm}</span></div>')
+                is_today = (d == today)
+                style = ("background:#fef9c3;border:1px solid #facc15;" if is_today
+                         else "background:#f8fafc;border:1px solid #e2e8f0;")
+                cols[dow].markdown(
+                    f'<div style="{style}border-radius:5px;min-height:64px;padding:3px 5px">'
+                    f'<div style="font-size:11px;font-weight:700;color:#334155">{dnum}</div>'
+                    f'{chips}</div>', unsafe_allow_html=True)
+
+        st.divider()
+        st.subheader("Vue saison — blocs & courses par coureur")
+        fig = go.Figure()
+        all_dates = [pd.Timestamp(today)]
+        for rid in show_ids:
+            p = plan_for(rid)
+            nm = labels[rid].split(" — ")[0]
+            for b in p["blocks"]:
+                s = pd.Timestamp(b["start"])
+                e = pd.Timestamp(b["end"]) + pd.Timedelta(days=1)
+                fig.add_trace(go.Bar(x=[(e - s).total_seconds() / 86400], base=[s],
+                                     y=[nm], orientation="h",
+                                     marker_color=color_of[rid], opacity=0.75,
+                                     name=b["label"], showlegend=False,
+                                     hovertemplate=f"{b['label']}<br>{b['start']} → "
+                                                   f"{b['end']}<extra></extra>"))
+                all_dates += [s, e]
+            for r in p["races"]:
+                s = pd.Timestamp(r["date"])
+                fig.add_trace(go.Scatter(x=[s], y=[nm], mode="markers+text",
+                                         marker=dict(symbol="diamond", size=13,
+                                                     color=PRIO_COLORS.get(PRIO_SHORT.get(r["prio"], "C"), "#94a3b8")),
+                                         text=[f"🏁 {r['name']}"], textposition="top center",
+                                         name=r["name"], showlegend=False))
+                all_dates.append(s)
+        if len(fig.data):
+            lo, hi = min(all_dates), max(all_dates)
+            fig.update_xaxes(range=[lo - pd.Timedelta(days=10),
+                                    hi + pd.Timedelta(days=10)])
+        fig.update_layout(template="plotly_white", height=70 + 46 * max(len(show_ids), 1),
+                          barmode="overlay", showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+with t_edit:
+    plan = plan_for(edit_id)
+    st.subheader(f"Courses — {labels[edit_id]}")
     with st.form("race_form", clear_on_submit=True):
         ra, rb, rc = st.columns([2, 1, 1])
         r_name = ra.text_input("Course (nom, lieu)")
@@ -73,13 +200,14 @@ with t_race:
             j = (d - pd.Timestamp.today()).days
             ca.markdown(f"**{r['name']}** — {d.strftime('%d/%m/%Y')} "
                         f"({f'dans {j} j' if j >= 0 else 'passée'}) · {r['prio']}")
-            _rm("races", i, f"rm_race_{i}")
+            if cb.button("🗑️", key=f"rm_race_{i}"):
+                del plan["races"][i]
+                st.rerun()
     else:
-        st.info("Aucune course. Ajoute les objectifs du coureur : l'IA s'en sert pour "
-                "construire les blocs.")
+        st.info("Aucune course — l'IA s'appuie dessus pour construire les blocs.")
 
-with t_bloc:
-    st.subheader("Blocs d'entraînement planifiés")
+    st.divider()
+    st.subheader(f"Blocs planifiés — {labels[edit_id]}")
     with st.form("block_form", clear_on_submit=True):
         ba, bb, bc = st.columns([1, 1, 2])
         b_start = ba.date_input("Début", value=date.today())
@@ -97,32 +225,34 @@ with t_bloc:
             tag = "🤖" if b.get("src") == "ia" else "✍️"
             ca.markdown(f"{tag} **{b['label']}** — {pd.Timestamp(b['start']).strftime('%d/%m')} "
                         f"→ {pd.Timestamp(b['end']).strftime('%d/%m/%Y')}")
-            _rm("blocks", i, f"rm_blk_{i}")
+            if cb.button("🗑️", key=f"rm_blk_{i}"):
+                del plan["blocks"][i]
+                st.rerun()
     else:
-        st.info("Aucun bloc. Planifie toi-même ou demande au coach IA.")
+        st.info("Aucun bloc — planifie toi-même ou demande au coach IA.")
 
 with t_ia:
-    st.subheader("Propositions du coach IA")
+    plan = plan_for(edit_id)
+    st.subheader(f"Propositions du coach IA — {labels[edit_id]}")
     model = st.selectbox("Modèle", CURATED_MODELS,
                          index=CURATED_MODELS.index(DEFAULT_MODEL), key="pl_model")
     if st.button("🤖 Demander des propositions", type="primary"):
         try:
-            m = client.get_metrics(rider_id) or {}
+            m = client.get_metrics(edit_id) or {}
         except Exception:
             m = {}
         try:
-            pp = client.get_power_profile(rider_id) or {}
+            pp = client.get_power_profile(edit_id) or {}
         except Exception:
             pp = {}
         try:
-            load = client.get_daily_load(rider_id, 28) or []
+            load = client.get_daily_load(edit_id, 28) or []
         except Exception:
             load = []
         load_14 = [l for l in load if str(l.get("date", "")) >=
                    (pd.Timestamp.today() - pd.Timedelta(days=14)).strftime("%Y-%m-%d")]
         ctx = {
-            "coureur": {"nom": rname, "role": athlete.get("role"),
-                        "poids": athlete.get("weight")},
+            "coureur": {"nom": labels[edit_id], "poids": _weight(edit_id)},
             "puissance": pp,
             "etat": {"ctl": m.get("ctl"), "atl": m.get("atl"),
                      "tsb": (float(m.get("ctl", 0) or 0) - float(m.get("atl", 0) or 0)),
@@ -165,7 +295,7 @@ with t_ia:
 
     props = st.session_state.get("plan_props")
     if props:
-        for i, b in enumerate(props):
+        for i, b in enumerate(list(props)):
             with st.container(border=True):
                 st.markdown(f"**{b.get('label', '?')}** — {b.get('start')} → {b.get('end')}")
                 if b.get("focus"):
@@ -178,10 +308,10 @@ with t_ia:
                                            "label": b.get("label", "Bloc IA"),
                                            "focus": b.get("focus", ""), "src": "ia"})
                     plan["blocks"].sort(key=lambda x: x["start"])
-                    props.pop(i)
+                    props.remove(b)
                     st.rerun()
                 if pb.button("❌ Écarter", key=f"rj_{i}"):
-                    props.pop(i)
+                    props.remove(b)
                     st.rerun()
 
     st.divider()
@@ -212,11 +342,11 @@ with t_ia:
             st.error(f"OpenRouter : {content}")
 
 with t_save:
-    st.subheader("Sauvegarde du plan")
+    st.subheader("Sauvegarde du plan (tous les coureurs)")
     st.caption("Le plan est gardé pendant ta session. Exporte-le en JSON pour le "
                "conserver, réimporte-le à la prochaine connexion (Streamlit Cloud ne "
                "permet pas d'écrire sur le serveur).")
-    blob = json.dumps(st.session_state.get("plan", {}), ensure_ascii=False, indent=1)
+    blob = json.dumps(plan_all, ensure_ascii=False, indent=1)
     st.download_button("⬇️ Exporter le plan (JSON)", blob, file_name="plannif_wt.json",
                        mime="application/json")
     up = st.file_uploader("Importer un plan (JSON)", type=["json"], key="plan_import")
