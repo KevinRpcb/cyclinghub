@@ -394,10 +394,10 @@ class VektaClient:
                 series[ts] = minutes
         return pd.DataFrame({"load": series.values}, index=idx)
 
-    def get_metrics(self, athlete_id: str) -> dict:
+    def get_metrics(self, athlete_id: str, days: int = 30) -> dict:
         athlete = self.get_athlete(athlete_id)
         try:
-            start, end = self._date_range(30)
+            start, end = self._date_range(days)
             out = {}
             hrv = self._hrv_metrics(athlete_id, start, end)
             if hrv:
@@ -405,7 +405,7 @@ class VektaClient:
             sleep = self._sleep_score(athlete_id, start, end)
             if sleep is not None:
                 out["sleep_score"] = sleep
-            load = self._load_frame(athlete_id, 120)
+            load = self._load_frame(athlete_id, max(days, 120))
             if load is not None:
                 ctl = load["load"].ewm(span=42, adjust=False).mean()
                 atl = load["load"].ewm(span=7, adjust=False).mean()
@@ -414,7 +414,8 @@ class VektaClient:
                 out["load_7d"] = int(load["load"].tail(7).sum())
                 out["load_28d"] = int(load["load"].tail(28).sum())
             if not out:
-                raise RuntimeError("aucune métrique lisible dans Vekta (30 derniers jours)")
+                raise RuntimeError(
+                    f"aucune métrique lisible dans Vekta ({days} derniers jours)")
             return out
         except Exception as e:
             self._fallback(e)
@@ -429,9 +430,9 @@ class VektaClient:
         self.last_error = self.last_error or "Charge Vekta indisponible — données de démonstration"
         return _demo_load(athlete, days)
 
-    def get_tt_efforts(self, athlete_id: str) -> list:
+    def get_tt_efforts(self, athlete_id: str, days: int = 180) -> list:
         try:
-            start, end = self._date_range(180)
+            start, end = self._date_range(days)
             rows = self._list(f"/users/{athlete_id}/activities", {"from": start, "to": end})
         except Exception as e:
             self._fallback(e)

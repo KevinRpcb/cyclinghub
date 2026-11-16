@@ -2,6 +2,7 @@ import base64
 from datetime import date
 
 import numpy as np
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -35,6 +36,24 @@ if not riders:
     st.info("Aucun coureur lisible dans la source choisie.")
     st.stop()
 
+PERIODS = {"7 derniers jours": 7, "14 jours": 14, "21 jours (stage)": 21,
+           "30 jours": 30, "90 jours": 90, "180 jours": 180,
+           "Saison (365 j)": 365, "Choisir les dates": None}
+per = st.selectbox("Période du rapport", list(PERIODS), key="rep_period")
+if PERIODS[per] is None:
+    dc1, dc2 = st.columns(2)
+    d_from = dc1.date_input("Du", value=date.today() - pd.Timedelta(days=30), key="rep_from")
+    d_to = dc2.date_input("Au", value=date.today(), key="rep_to")
+    if d_to < d_from:
+        d_from, d_to = d_to, d_from
+    days = max(1, (d_to - d_from).days + 1)
+    period_lbl = f"{d_from.strftime('%d/%m/%Y')} → {d_to.strftime('%d/%m/%Y')} ({days} j)"
+    if days <= 1:
+        period_lbl += " — rapport d'une séance"
+else:
+    days = PERIODS[per]
+    period_lbl = f"{days} derniers jours"
+
 names = [r["name"] for r in riders]
 sel = st.multiselect("Coureurs du rapport", names, default=names[: min(8, len(names))])
 rdate = st.date_input("Date du rapport", value=date.today())
@@ -44,12 +63,15 @@ DURS = [60, 180, 300, 1200, 3600]
 DURS_LBL = ["1 min", "3 min", "5 min", "20 min", "60 min"]
 
 
-def rider_row(r):
+def rider_row(r, days):
     aid = r["id"]
-    m = client.get_metrics(aid)
+    m = client.get_metrics(aid, days=days)
     pp = client.get_power_profile(aid)
-    efforts = client.get_tt_efforts(aid) if hasattr(client, "get_tt_efforts") else []
-    model = fit_cp_model(efforts) if efforts and len(efforts) >= 2 else None
+    efforts = (client.get_tt_efforts(aid, days=days)
+               if hasattr(client, "get_tt_efforts") else [])
+    pts = [(e["duration_s"], e["avg_w"]) for e in efforts
+           if e.get("duration_s") and e.get("avg_w")]
+    model = fit_cp_model(pts) if len(pts) >= 2 else None
     ppr = {}
     if model:
         for s in DURS:
@@ -88,7 +110,7 @@ def rider_row(r):
 
 if st.button("📄 Générer le rapport", type="primary"):
     with st.spinner("Collecte des données coureurs…"):
-        rows = [rider_row(riders[names.index(n)]) for n in sel]
+        rows = [rider_row(riders[names.index(n)], days) for n in sel]
 
     logo_uri = ""
     if logo_up is not None:
@@ -162,7 +184,7 @@ table.ppr td {{ border: 1px solid #dde0e8; padding: 5px 8px; text-align: center;
 @media print {{ .printbtn {{ display: none; }} }}
 </style></head><body>
 <button class="printbtn" onclick="window.print()">🖨️ Print / PDF</button>
-<div class="hero">{logo_html}<div><div class="sub">Team report — weekly</div>
+<div class="hero">{logo_html}<div><div class="sub">Team report — {period_lbl}</div>
 <h1>Rapport d'équipe</h1></div>
 <div style="margin-left:auto;text-align:center;background:rgba(255,255,255,.1);padding:8px 16px;border-radius:6px">
 <span style="font-size:10px;color:rgba(255,255,255,.6)">DATE</span><br>
