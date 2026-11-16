@@ -474,6 +474,21 @@ def rider_plan(name):
     return r, ov_id, proto, cvals, segs, blocks
 
 
+def _wu_fit_bytes(r, segs):
+    from core.fitexport import build_workout_fit
+    steps = []
+    for t0, t1, w, z in segs:
+        sec = int(round((t1 - t0) * 60))
+        if sec <= 0:
+            continue
+        if steps and steps[-1]["watts"] == int(w or 0):
+            steps[-1]["seconds"] += sec
+            continue
+        steps.append({"name": f"{str(z).upper()} {sec // 60}'{sec % 60:02d}",
+                      "seconds": sec, "watts": int(w or 0)})
+    return build_workout_fit(f"WU24 {r['name']}", steps)
+
+
 for name in selected:
     r, ov_id, proto, cvals, segs, blocks = rider_plan(name)
     ov = st.session_state.setdefault(f"wu_ov_{name}", {})
@@ -538,6 +553,9 @@ for name in selected:
                     if st.button("↺ Réinitialiser", key=f"wu_reset_{name}"):
                         st.session_state[f"wu_ov_{name}"] = {}
                         st.rerun()
+            st.download_button("⬇️ Compteur (.fit)", _wu_fit_bytes(r, segs),
+                               f"warmup_{r['name'].replace(' ', '_')}.fit",
+                               "application/octet-stream", key=f"wu_fit_{name}")
 
 # ─── Document à imprimer (page 1 : course + images + grand graphique ; pages suivantes : autocollants) ───
 _FILL = {"z3": "#bbf7d0", "z4": "#fef08a", "z5": "#fecaca", "easy": "#f1f5f9", "sprint": "#ffccbc"}

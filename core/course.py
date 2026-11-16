@@ -160,7 +160,8 @@ def build_segments(points: list, bin_m: float = 25.0) -> pd.DataFrame:
 def fetch_weather(lat: float, lon: float, date: str = None, hour: int = 13) -> dict:
     params = {
         "latitude": round(lat, 3), "longitude": round(lon, 3),
-        "hourly": "temperature_2m,surface_pressure,wind_speed_10m,wind_direction_10m",
+        "hourly": ("temperature_2m,surface_pressure,wind_speed_10m,"
+                   "wind_direction_10m,wind_gusts_10m,precipitation"),
         "wind_speed_unit": "ms", "timezone": "auto",
     }
     if date:
@@ -180,6 +181,8 @@ def fetch_weather(lat: float, lon: float, date: str = None, hour: int = 13) -> d
             "pressure_hpa": float(h["surface_pressure"][target_idx]),
             "wind_ms": float(h["wind_speed_10m"][target_idx]),
             "wind_dir": float(h["wind_direction_10m"][target_idx]),
+            "gusts_ms": float(h.get("wind_gusts_10m", [0] * len(times))[target_idx] or 0),
+            "precip_mm": float(h.get("precipitation", [0] * len(times))[target_idx] or 0),
             "time": times[target_idx].strftime("%d/%m %H:%M"),
         }
     except Exception as e:
@@ -195,11 +198,14 @@ def headwind_ms(wind_ms: float, wind_dir: float, seg_bearing: float) -> float:
 def simulate(segs: pd.DataFrame, mass_kg: float, scx: float, rho: float, cp: float,
              wprime: float, p_target: float = None, goal_time_s: float = None,
              k_up: float = 2.2, crr: float = 0.004, eta: float = 0.976,
-             wind_ms: float = 0.0, wind_dir: float = 0.0) -> dict:
+             wind_ms: float = 0.0, wind_dir: float = 0.0,
+             k_wind: float = 0.04) -> dict:
     """Répartit la puissance selon la pente/le vent, calibre p0 sur l'objectif.
 
     p_target : puissance moyenne visée (W). goal_time_s : temps objectif (s) —
     si fourni, p0 est calibré par bissection pour atteindre l'objectif.
+    Pacing optimal : on appuie plus dans le vent de face (k_wind par m/s,
+    le gain de temps y est maximal) et on relâche vent de dos.
     """
     grads = segs["gradient_pct"].values
     bears = segs["bearing_deg"].values
@@ -209,7 +215,7 @@ def simulate(segs: pd.DataFrame, mass_kg: float, scx: float, rho: float, cp: flo
     def run(p0):
         powers, speeds, times = [], [], []
         for g, d, w in zip(grads, dists, winds):
-            p = p0 * (1.0 + k_up * g / 100.0)
+            p = p0 * (1.0 + k_up * g / 100.0 + k_wind * w)
             p = float(np.clip(p, max(60.0, 0.55 * p0), p0 * 3.5))
             v = solve_speed(p, g, mass_kg, scx, rho, crr, eta, w)
             powers.append(p)
