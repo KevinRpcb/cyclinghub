@@ -129,7 +129,7 @@ if fixed_model is not None:
 else:
     pts = [(s, pp[k]) for k, s in [("p1m", 60), ("p3m", 180), ("p5m", 300),
                                    ("p10m", 600), ("p20m", 1200)] if pp.get(k)]
-    model = fit_cp_model(pts) or {"cp": float(pp["cp"]), "wprime": 20000.0}
+    model = fit_cp_model(pts) or {"cp": float(pp.get("cp") or 380), "wprime": 20000.0}
 
 with st.expander("⚙️ Paramètres de simulation", expanded=True):
     p1, p2, p3, p4 = st.columns(4)
