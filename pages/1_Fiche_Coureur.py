@@ -48,6 +48,30 @@ with st.sidebar.expander("➕ Ajouter un coureur Vekta par son ID"):
     if manual_ids and st.button("Retirer les coureurs ajoutés à la main", key="vekta_mclear"):
         st.session_state["vekta_manual_ids"] = []
         st.rerun()
+
+with st.sidebar.expander("🔎 Diagnostic Vekta"):
+    st.caption("Montre les espaces de travail vus par ta clé API, et ton rôle dans chacun.")
+    if st.button("Voir mes espaces et mon rôle", key="vekta_diag"):
+        try:
+            me = client._get("/users/me")
+            ws = me.get("workspaces") if isinstance(me, dict) else None
+            if isinstance(ws, list) and ws:
+                for w in ws:
+                    if not isinstance(w, dict):
+                        st.write(f"• {w}")
+                        continue
+                    nm = (w.get("name") or w.get("workspaceName") or w.get("title")
+                          or w.get("id") or "?")
+                    rl = (w.get("role") or w.get("workspaceRole")
+                          or w.get("membershipRole") or "?")
+                    st.write(f"• **{nm}** — rôle : {rl}")
+            else:
+                st.write("Aucun espace de travail visible depuis l'API.")
+        except PermissionError:
+            st.error("Vekta refuse (403) : ton compte n'a pas d'abonnement personnel actif — "
+                     "l'API ne peut pas montrer tes espaces. Vérifie ton rôle dans l'app Vekta.")
+        except Exception as e:
+            st.error(str(e))
 for mrec in manual_ids:
     if mrec["id"] not in [a["id"] for a in riders]:
         try:
