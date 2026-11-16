@@ -130,24 +130,29 @@ def build_segments(points: list, bin_m: float = 25.0) -> pd.DataFrame:
     else:
         df["ele"] = 0.0
     edges = np.arange(0, df["d"].iloc[-1] + bin_m, bin_m)
-    idx = np.searchsorted(df["d"].values, edges)
-    idx = np.clip(idx, 0, len(df) - 1)
+    dvals = df["d"].values
+    evals = df["ele"].values
+    bvals = df["bearing"].values
+    idx = np.clip(np.searchsorted(dvals, edges), 0, len(df) - 1)
+    d_at = np.minimum(edges, dvals[-1])
     segs = []
+    prev_ele = float(evals[0])
     for i in range(len(edges) - 1):
-        a, b = idx[i], idx[i + 1]
-        if b <= a:
-            continue
-        dd = df["d"].iloc[b - 1] - df["d"].iloc[a]
+        dd = float(d_at[i + 1] - d_at[i])
         if dd <= 0:
             continue
-        de = df["ele"].iloc[b - 1] - df["ele"].iloc[a]
+        a = int(idx[i])
+        b = int(idx[i + 1]) if i + 1 < len(edges) - 1 else len(df)
+        b = max(b, min(a + 1, len(df)))
+        e_end = float(evals[b - 1])
         segs.append({
-            "start_km": edges[i] / 1000.0,
+            "start_km": float(d_at[i]) / 1000.0,
             "dist_m": dd,
-            "gradient_pct": float(np.clip(de / dd * 100.0, -18.0, 22.0)),
-            "bearing_deg": float(df["bearing"].iloc[a:b].mean()),
-            "ele": float(df["ele"].iloc[b - 1]),
+            "gradient_pct": float(np.clip((e_end - prev_ele) / dd * 100.0, -18.0, 22.0)),
+            "bearing_deg": float(bvals[a:b].mean()),
+            "ele": e_end,
         })
+        prev_ele = e_end
     return pd.DataFrame(segs)
 
 
