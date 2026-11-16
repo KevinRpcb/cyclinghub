@@ -12,6 +12,7 @@ import streamlit.components.v1 as components
 from core.auth import gate
 from core.config import wu_protocols
 from core.vekta import VektaClient
+from core.tp import TPClient, session_client
 
 st.set_page_config(page_title="Échauffement WU24 — WT Performance Hub", page_icon="🔥", layout="wide")
 gate()
@@ -247,14 +248,36 @@ if PROTO_ERROR or not PROTOCOLS:
     st.code(WU_SECRETS_SKELETON, language="toml")
     st.stop()
 
-src = st.sidebar.radio("Source des données", ["Vekta (API)", "Fichier CSV"], key="wu_src")
+src = st.sidebar.radio("Source des données", ["Vekta (API)", "TrainingPeaks", "Fichier CSV"],
+                       key="wu_src")
 riders = []
+if src == "TrainingPeaks":
+    tp = session_client()
+    if not tp.configured:
+        st.sidebar.warning("TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD dans les "
+                           "Secrets Streamlit.")
+    else:
+        tp_riders = tp.get_athletes()
+        if not tp_riders:
+            st.sidebar.warning(f"TrainingPeaks : {tp.last_error}")
+        else:
+            for a in tp_riders:
+                cp = tp.get_cp_estimate(a["id"]).get("cp")
+                if not cp:
+                    continue
+                riders.append({"name": a.get("name", a["id"]),
+                               "team": a.get("team", a.get("role", "Team")),
+                               "hrmax": a.get("hrmax", 180),
+                               "weight": a.get("weight", 70), "cp": cp})
+            if not riders:
+                st.sidebar.warning("Aucun coureur TP avec un pic puissance 20 ou 60 min "
+                                   "trouvé — utilise le CSV ou l'ajout manuel.")
 if src == "Vekta (API)":
     for a in athletes:
         pp = client.get_power_profile(a["id"])
         riders.append({"name": a.get("name", a["id"]), "team": a.get("team", a.get("role", "Team")),
                        "hrmax": a.get("hrmax", 180), "weight": a.get("weight", 70), **pp})
-else:
+elif src == "Fichier CSV":
     up = st.sidebar.file_uploader("database_CP.csv", type=["csv"])
     if up:
         try:

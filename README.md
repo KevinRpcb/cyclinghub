@@ -41,8 +41,9 @@ Voir `.streamlit/secrets.toml.example` pour le modèle complet :
 - `PUBMED_EMAIL`, `PUBMED_API_KEY` (optionnel) — identifie les requêtes PubMed.
 - `TP_USERNAME`, `TP_PASSWORD` (optionnel) — pont **TrainingPeaks** (lecture
   seule) via l'API interne du site web (celle qu'utilise WKO5). Ajoute une
-  source « TrainingPeaks » dans la page Fiche Coureur : athlètes coachés,
-  CTL/ATL/TSB, charge TSS, séances et meilleurs pics puissance. API non
+  source « TrainingPeaks » dans les pages Fiche Coureur, TT Center,
+  Prévision Perf et Échauffement : athlètes coachés, CTL/ATL/TSB, charge TSS,
+  séances, efforts vélo et meilleurs pics puissance (CP estimée). API non
   officielle : peut changer sans préavis ; l'app retombe sur Vekta en cas
   d'échec.
 - `[WU_PROTOCOLS.*]` — **les détails chiffrés des protocoles d'échauffement

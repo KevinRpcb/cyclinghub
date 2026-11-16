@@ -5,13 +5,26 @@ import streamlit as st
 
 from core.auth import gate
 from core.vekta import VektaClient
+from core.tp import TPClient, session_client
 from core.powermodel import fit_cp_model, rho_air, wprime_balance
 from core.course import parse_course, build_segments, fetch_weather, simulate
 
 st.set_page_config(page_title="Prévision de perf — WT Performance Hub", page_icon="🎯", layout="wide")
 gate()
 
+src = st.sidebar.radio("Source des données", ["Vekta (API)", "TrainingPeaks"], key="prev_src")
 client = VektaClient()
+if src == "TrainingPeaks":
+    tp = session_client()
+    if not tp.configured:
+        st.warning("TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD dans les Secrets "
+                   "Streamlit — Vekta est utilisée en attendant.")
+    else:
+        riders_tp = tp.get_athletes()
+        if riders_tp:
+            client = tp
+        else:
+            st.warning(f"TrainingPeaks : {tp.last_error} — repli sur Vekta.")
 riders = client.get_athletes()
 labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
 rider_id = st.sidebar.selectbox("Coureur", list(labels.keys()), format_func=lambda x: labels[x],
@@ -53,7 +66,7 @@ model = fit_cp_model(pts) or {"cp": float(pp["cp"]), "wprime": 20000.0}
 
 with st.expander("⚙️ Paramètres de simulation", expanded=True):
     p1, p2, p3, p4 = st.columns(4)
-    mass = p1.number_input("Masse totale (kg)", 40.0, 120.0, float(athlete["weight"]) + 8.0, 0.5)
+    mass = p1.number_input("Masse totale (kg)", 40.0, 120.0, float(athlete.get("weight") or 70.0) + 8.0, 0.5)
     scx = p2.number_input("SCx (m²)", 0.15, 0.50, float(st.session_state.get(f"scx_{rider_id}", 0.22)), 0.005)
     cp = p3.number_input("CP (W)", 150, 700, int(model["cp"]))
     wprime = p4.number_input("W′ (kJ)", 5.0, 40.0, model["wprime"] / 1000.0, 0.5)
