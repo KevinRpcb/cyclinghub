@@ -267,8 +267,16 @@ else:
             else:
                 for c in ("hrmax", "weight", "cp"):
                     df[c] = pd.to_numeric(df[c], errors="coerce")
+                before = len(df)
                 df = df.dropna(subset=required)
-                riders = df.to_dict("records")
+                if df.empty:
+                    st.error("Aucune ligne exploitable — vérifie que 'hrmax', 'weight' et 'cp' "
+                             "contiennent bien des nombres (pas de texte comme '400 W').")
+                else:
+                    riders = df.to_dict("records")
+                    st.sidebar.success(f"{len(riders)} coureur(s) chargé(s) depuis le CSV"
+                                       + (f" ({before - len(riders)} ligne(s) écartée(s))."
+                                          if before != len(riders) else "."))
         except Exception as e:
             st.error(f"CSV illisible : {e}")
     else:
@@ -351,7 +359,7 @@ with st.expander("✏️ Éditeur de protocole custom", expanded=proto_id == "cu
     try:
         edited = st.data_editor(
             st.session_state["wu_custom_steps"],
-            columns={
+            column_config={
                 "zone": st.column_config.SelectboxColumn("Zone", options=list(ZONE_META.keys()), required=True),
                 "ref": st.column_config.SelectboxColumn("Référence", options=REFS, required=True),
                 "pct": st.column_config.NumberColumn("% réf.", min_value=30, max_value=200, step=1),
@@ -387,7 +395,11 @@ if proto_id == "custom":
 # ════════════════════════════════════════════════════════════════════════
 names = [r["name"] for r in riders]
 if st.session_state.get("wu_selected"):
-    st.session_state["wu_selected"] = [n for n in st.session_state["wu_selected"] if n in names]
+    kept = [n for n in st.session_state["wu_selected"] if n in names]
+    if kept:
+        st.session_state["wu_selected"] = kept
+    else:
+        del st.session_state["wu_selected"]
 selected = st.multiselect(f"Coureurs sélectionnés ({len(names)} disponibles — max 20)", names,
                           default=st.session_state.get("wu_selected", names[:3]),
                           max_selections=20, key="wu_selected")
