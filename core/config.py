@@ -24,6 +24,14 @@ def vekta_base_url() -> str:
     return get_secret("VEKTA_BASE_URL", "https://api.joinvekta.com")
 
 
+def tp_username() -> str:
+    return get_secret("TP_USERNAME")
+
+
+def tp_password() -> str:
+    return get_secret("TP_PASSWORD")
+
+
 def pubmed_email() -> str:
     return get_secret("PUBMED_EMAIL", "coach.wt@equipe.com")
 

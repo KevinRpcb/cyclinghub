@@ -5,6 +5,7 @@ import streamlit as st
 
 from core.auth import gate
 from core.vekta import VektaClient
+from core.tp import TPClient
 from core.physiology import compute_pmc, readiness, metric_comments, vfc_verdict
 from core.openrouter import chat, CURATED_MODELS, DEFAULT_MODEL
 from core.config import openrouter_key
@@ -12,78 +13,92 @@ from core.config import openrouter_key
 st.set_page_config(page_title="Fiche Coureur — WT Performance Hub", page_icon="🧑‍⚕️", layout="wide")
 gate()
 
+src = st.sidebar.radio("Source des données", ["Vekta (API)", "TrainingPeaks"], key="fiche_src")
 client = VektaClient()
+if src == "TrainingPeaks":
+    tp = TPClient()
+    if not tp.configured:
+        st.warning("TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD dans les Secrets "
+                   "Streamlit (identifiants de ton compte coach TP) — Vekta est utilisée "
+                   "en attendant.")
+    else:
+        riders_tp = tp.get_athletes()
+        if riders_tp:
+            client = tp
+        else:
+            st.warning(f"TrainingPeaks : {tp.last_error} — repli sur Vekta.")
 riders = client.get_athletes()
 if client.last_error:
     st.warning(f"Vekta : {client.last_error} — données de démonstration affichées.")
 elif client.notice:
     st.info(client.notice)
 
-manual_ids = st.session_state.setdefault("vekta_manual_ids", [])
-with st.sidebar.expander("➕ Ajouter un coureur Vekta par son ID"):
-    st.caption("Ouvre le profil du coureur dans l'app Vekta : copie l'identifiant complet depuis "
-               "l'URL (ex. usr_abc123), avec le préfixe usr_ et tout ce qui suit.")
-    mid = st.text_input("ID Vekta du coureur", key="vekta_mid")
-    mname = st.text_input("Nom à afficher (si l'ID marche)", key="vekta_mname")
-    if st.button("Ajouter ce coureur", key="vekta_madd"):
-        mid_clean = mid.strip()
-        if not mid_clean:
-            st.error("Colle d'abord l'ID du coureur.")
-        elif mid_clean in [m["id"] for m in manual_ids] or mid_clean in [a["id"] for a in riders]:
-            st.warning("Ce coureur est déjà dans la liste.")
-        else:
-            try:
-                client._get(f"/users/{mid_clean}")
-                manual_ids.append({"id": mid_clean, "name": mname.strip()})
-                st.success(f"ID {mid_clean} accepté par Vekta — coureur ajouté.")
-                st.rerun()
-            except PermissionError:
-                st.error("Refusé (403) : ce coureur n'a pas d'abonnement Vekta actif, "
-                         "ou il n'est pas dans tes workspaces.")
-            except LookupError:
-                st.error("Introuvable (404) : cet ID n'est pas un de tes athlètes.")
-            except RuntimeError as e:
-                st.error(str(e))
-            except Exception as e:
-                st.error("Vekta injoignable : " + str(e)[:150])
-    if manual_ids and st.button("Retirer les coureurs ajoutés à la main", key="vekta_mclear"):
-        st.session_state["vekta_manual_ids"] = []
-        st.rerun()
-
-with st.sidebar.expander("🔎 Diagnostic Vekta"):
-    st.caption("Montre les espaces de travail vus par ta clé API, et ton rôle dans chacun.")
-    if st.button("Voir mes espaces et mon rôle", key="vekta_diag"):
-        try:
-            me = client._get("/users/me")
-            ws = me.get("workspaces") if isinstance(me, dict) else None
-            if isinstance(ws, list) and ws:
-                for w in ws:
-                    if not isinstance(w, dict):
-                        st.write(f"• {w}")
-                        continue
-                    nm = (w.get("name") or w.get("workspaceName") or w.get("title")
-                          or w.get("id") or "?")
-                    rl = (w.get("role") or w.get("workspaceRole")
-                          or w.get("membershipRole") or "?")
-                    st.write(f"• **{nm}** — rôle : {rl}")
+if isinstance(client, VektaClient):
+    manual_ids = st.session_state.setdefault("vekta_manual_ids", [])
+    with st.sidebar.expander("➕ Ajouter un coureur Vekta par son ID"):
+        st.caption("Ouvre le profil du coureur dans l'app Vekta : copie l'identifiant complet depuis "
+                   "l'URL (ex. usr_abc123), avec le préfixe usr_ et tout ce qui suit.")
+        mid = st.text_input("ID Vekta du coureur", key="vekta_mid")
+        mname = st.text_input("Nom à afficher (si l'ID marche)", key="vekta_mname")
+        if st.button("Ajouter ce coureur", key="vekta_madd"):
+            mid_clean = mid.strip()
+            if not mid_clean:
+                st.error("Colle d'abord l'ID du coureur.")
+            elif mid_clean in [m["id"] for m in manual_ids] or mid_clean in [a["id"] for a in riders]:
+                st.warning("Ce coureur est déjà dans la liste.")
             else:
-                st.write("Aucun espace de travail visible depuis l'API.")
-        except PermissionError:
-            st.error("Vekta refuse (403) : ton compte n'a pas d'abonnement personnel actif — "
-                     "l'API ne peut pas montrer tes espaces. Vérifie ton rôle dans l'app Vekta.")
-        except Exception as e:
-            st.error(str(e))
-for mrec in manual_ids:
-    if mrec["id"] not in [a["id"] for a in riders]:
-        try:
-            client._get(f"/users/{mrec['id']}")
-            a = client.get_athlete(mrec["id"])
-            if a.get("id") == mrec["id"]:
-                if mrec["name"] and a.get("name") in (None, "", "?"):
-                    a["name"] = mrec["name"]
-                riders = riders + [a]
-        except Exception:
-            pass
+                try:
+                    client._get(f"/users/{mid_clean}")
+                    manual_ids.append({"id": mid_clean, "name": mname.strip()})
+                    st.success(f"ID {mid_clean} accepté par Vekta — coureur ajouté.")
+                    st.rerun()
+                except PermissionError:
+                    st.error("Refusé (403) : ce coureur n'a pas d'abonnement Vekta actif, "
+                             "ou il n'est pas dans tes workspaces.")
+                except LookupError:
+                    st.error("Introuvable (404) : cet ID n'est pas un de tes athlètes.")
+                except RuntimeError as e:
+                    st.error(str(e))
+                except Exception as e:
+                    st.error("Vekta injoignable : " + str(e)[:150])
+        if manual_ids and st.button("Retirer les coureurs ajoutés à la main", key="vekta_mclear"):
+            st.session_state["vekta_manual_ids"] = []
+            st.rerun()
+
+    with st.sidebar.expander("🔎 Diagnostic Vekta"):
+        st.caption("Montre les espaces de travail vus par ta clé API, et ton rôle dans chacun.")
+        if st.button("Voir mes espaces et mon rôle", key="vekta_diag"):
+            try:
+                me = client._get("/users/me")
+                ws = me.get("workspaces") if isinstance(me, dict) else None
+                if isinstance(ws, list) and ws:
+                    for w in ws:
+                        if not isinstance(w, dict):
+                            st.write(f"• {w}")
+                            continue
+                        nm = (w.get("name") or w.get("workspaceName") or w.get("title")
+                              or w.get("id") or "?")
+                        rl = (w.get("role") or w.get("workspaceRole")
+                              or w.get("membershipRole") or "?")
+                        st.write(f"• **{nm}** — rôle : {rl}")
+                else:
+                    st.write("Aucun espace de travail visible depuis l'API.")
+            except PermissionError:
+                st.error("Vekta refuse (403) : ton compte n'a pas d'abonnement personnel actif — "
+                         "l'API ne peut pas montrer tes espaces. Vérifie ton rôle dans l'app Vekta.")
+            except Exception as e:
+                st.error(str(e))
+    for mrec in manual_ids:
+        if mrec["id"] not in [a["id"] for a in riders]:
+            try:
+                client._get(f"/users/{mrec['id']}")
+                a = client.get_athlete(mrec["id"])
+                if a.get("id") == mrec["id"]:
+                    if mrec["name"] and a.get("name") in (None, "", "?"):
+                        a["name"] = mrec["name"]
+                    riders = riders + [a]
+            except Exception:
+                pass
 
 labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
 rider_id = st.sidebar.selectbox("Coureur", list(labels.keys()), format_func=lambda x: labels[x],
@@ -91,6 +106,25 @@ rider_id = st.sidebar.selectbox("Coureur", list(labels.keys()), format_func=lamb
 st.session_state["rider_id"] = rider_id
 athlete = client.get_athlete(rider_id)
 m = client.get_metrics(rider_id)
+
+st.caption("Source des données : " + ("TrainingPeaks (lecture seule)"
+            if isinstance(client, TPClient) else "Vekta (API)"))
+
+if isinstance(client, TPClient):
+    with st.expander("🗓️ Séances TrainingPeaks — 14 derniers jours"):
+        _s = (pd.Timestamp.today().normalize() - pd.Timedelta(days=13)).strftime("%Y-%m-%d")
+        _e = pd.Timestamp.today().strftime("%Y-%m-%d")
+        wos = client.get_workouts(rider_id, _s, _e)
+        if wos:
+            wdf = pd.DataFrame(wos)
+            cols = [c for c in ["date", "title", "duration_h", "distance_km",
+                                "tss", "avg_w", "avg_hr"] if c in wdf.columns]
+            wdf = wdf[cols].sort_values("date", ascending=False)
+            wdf.columns = [c.replace("_", " ") for c in wdf.columns]
+            st.dataframe(wdf, hide_index=True)
+        else:
+            extra = f" ({client.last_error})" if client.last_error else ""
+            st.caption("Aucune séance lisible dans TrainingPeaks sur les 14 derniers jours." + extra)
 
 st.title(f"🧑‍⚕️ Fiche Coureur — {athlete.get('name', rider_id)}")
 st.caption(f"Profil : {athlete.get('role','n/c')} · {athlete.get('weight','?')} kg · FCmax {athlete.get('hrmax','?')} bpm")
