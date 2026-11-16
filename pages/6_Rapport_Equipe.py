@@ -95,6 +95,69 @@ def _ppr_from_profile(pp):
     return out or None
 
 
+def _ppr_svg(r):
+    import math
+    series = [("Période", r["ppr"], "#2563eb", "2.2", ""),
+              ("Saison -1", r["ppr_prev"], "#94a3b8", "1.6", "6 3"),
+              ("All-time", r["ppr_all"], "#111318", "1.6", "2 3")]
+    series = [(lbl, d, c, w, da) for lbl, d, c, w, da in series if d]
+    if not series:
+        return ('<div style="font-size:11px;color:#7a8194;padding:6px 0">'
+                'Courbe PPR indisponible — aucune donnée puissance pour ce coureur.</div>')
+    vals = [v for _, d, _, _, _ in series for v in d.values()]
+    lo, hi = min(vals), max(vals)
+    if hi - lo < 20:
+        lo, hi = lo - 15, hi + 15
+    else:
+        lo, hi = lo * 0.96, hi * 1.04
+    W, H = 660, 150
+    PL, PRX, PT, PB = 42, 12, 14, 20
+    cw, ch = W - PL - PRX, H - PT - PB
+
+    def xf(s):
+        return PL + (math.log10(s) - math.log10(60)) / (math.log10(3600) - math.log10(60)) * cw
+
+    def yf(v):
+        return PT + ch - (v - lo) / (hi - lo) * ch
+
+    out = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" '
+           f'style="width:100%;height:auto">']
+    out.append(f'<rect x="{PL}" y="{PT}" width="{cw}" height="{ch}" fill="#f8fafc"/>')
+    for gv in (lo, (lo + hi) / 2, hi):
+        gy = yf(gv)
+        out.append(f'<line x1="{PL}" y1="{gy:.1f}" x2="{PL + cw}" y2="{gy:.1f}" '
+                   f'stroke="#dde0e8" stroke-width="0.7"/>')
+        out.append(f'<text x="{PL - 5}" y="{gy + 3:.1f}" text-anchor="end" '
+                   f'font-size="9" fill="#7a8194" font-family="Arial">{gv:.0f}</text>')
+    for s, lbl in [(60, "1'"), (180, "3'"), (300, "5'"), (1200, "20'"), (3600, "60'")]:
+        gx = xf(s)
+        out.append(f'<line x1="{gx:.1f}" y1="{PT + ch}" x2="{gx:.1f}" y2="{PT + ch + 3}" '
+                   f'stroke="#c8ccd6" stroke-width="0.8"/>')
+        out.append(f'<text x="{gx:.1f}" y="{H - 6}" text-anchor="middle" '
+                   f'font-size="9" fill="#7a8194" font-family="Arial">{lbl}</text>')
+    out.append(f'<line x1="{PL}" y1="{PT + ch}" x2="{PL + cw}" y2="{PT + ch}" '
+               f'stroke="#c8ccd6" stroke-width="1"/>')
+    out.append(f'<line x1="{PL}" y1="{PT}" x2="{PL}" y2="{PT + ch}" '
+               f'stroke="#c8ccd6" stroke-width="1"/>')
+    for lbl, d, col, wd, dash in series:
+        pts = " ".join(f"{xf(s):.1f},{yf(v):.1f}" for s, v in sorted(d.items()))
+        da = f' stroke-dasharray="{dash}"' if dash else ""
+        out.append(f'<polyline points="{pts}" fill="none" stroke="{col}" '
+                   f'stroke-width="{wd}"{da} stroke-linejoin="round"/>')
+        for s, v in d.items():
+            out.append(f'<circle cx="{xf(s):.1f}" cy="{yf(v):.1f}" r="2.4" fill="{col}"/>')
+    lx = PL + cw - 190
+    for i, (lbl, _, col, _, dash) in enumerate(series):
+        ly = PT + 10 + i * 13
+        da = f' stroke-dasharray="{dash}"' if dash else ""
+        out.append(f'<line x1="{lx}" y1="{ly}" x2="{lx + 22}" y2="{ly}" '
+                   f'stroke="{col}" stroke-width="2"{da}/>')
+        out.append(f'<text x="{lx + 27}" y="{ly + 3}" font-size="9" '
+                   f'fill="#334155" font-family="Arial">{lbl}</text>')
+    out.append('</svg>')
+    return "".join(out)
+
+
 def rider_row(r, days, offset=0):
     aid = r["id"]
     errs = []
@@ -255,6 +318,7 @@ if st.button("📄 Générer le rapport", type="primary"):
                          f'<td><b>{cur}</b></td><td>{prv}</td><td>{allw}</td></tr>')
         ppr_note = ("modèle ajusté sur les efforts de la période" if r["model_fit"]
                     else "profil puissance (all-time)")
+        ppr_curve = _ppr_svg(r)
         miss_prev = ("" if r["ppr_prev"]
                      else " — aucun effort CLM trouvé l'an dernier sur cette fenêtre")
         cards += f'''
@@ -271,6 +335,7 @@ if st.button("📄 Générer le rapport", type="primary"):
   <div class="sec">Fatigue & fraîcheur</div>
   <table class="grid"><tr>{fatigue_cells}</tr></table>
   <div class="ppr-title">PPR — puissance moyenne maximale ({ppr_note})</div>
+  {ppr_curve}
   <table class="ppr"><tr><th>Durée</th><th>Période</th><th>Saison -1</th><th>All-time</th></tr>
   {ppr_rows}</table>
   <div class="ppr-miss">Efforts trouvés — période : {r["n_eff_now"]} · saison -1 : {r["n_eff_prev"]}{miss_prev}</div>
