@@ -262,8 +262,10 @@ def _pacing_svg(parts, segs, total_km, power_curve=None):
     def tx(km):
         return PL + cw * (km / max(total_km, 0.1))
     svg = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">']
-    svg.append(f'<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="5" refY="3.5" '
-               f'orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#64748b"/></marker></defs>')
+    svg.append(f'<defs><marker id="ahr" markerWidth="6" markerHeight="6" refX="4.4" refY="3" '
+               f'orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#dc2626"/></marker>'
+               f'<marker id="ahg" markerWidth="6" markerHeight="6" refX="4.4" refY="3" '
+               f'orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#16a34a"/></marker></defs>')
 
     d_km = (segs["start_km"] + segs["dist_m"] / 1000.0).values
     if "ele" in segs.columns:
@@ -309,10 +311,11 @@ def _pacing_svg(parts, segs, total_km, power_curve=None):
             x_a = cx + (alen / 2 if headwind else -alen / 2)
             x_b = cx - (alen / 2 if headwind else -alen / 2)
             wcol = "#dc2626" if headwind else "#16a34a"
+            mk = "ahr" if headwind else "ahg"
             svg.append(f'<line x1="{x_a:.1f}" y1="{wind_y}" x2="{x_b:.1f}" y2="{wind_y}" '
-                       f'stroke="{wcol}" stroke-width="3.5" marker-end="url(#ah)"/>')
+                       f'stroke="{wcol}" stroke-width="1.8" marker-end="url(#{mk})"/>')
             lbl = "head" if headwind else "tail"
-            svg.append(f'<text x="{cx:.1f}" y="{wind_y - 7}" text-anchor="middle" font-size="10" '
+            svg.append(f'<text x="{cx:.1f}" y="{wind_y - 9}" text-anchor="middle" font-size="10" '
                        f'font-family="Arial" font-weight="bold" fill="{wcol}">{abs(wk):.0f} {lbl}</text>')
 
     for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
