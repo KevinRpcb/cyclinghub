@@ -19,6 +19,47 @@ if client.last_error:
 elif client.notice:
     st.info(client.notice)
 
+manual_ids = st.session_state.setdefault("vekta_manual_ids", [])
+with st.sidebar.expander("➕ Ajouter un coureur Vekta par son ID"):
+    st.caption("Ouvre le profil du coureur dans l'app Vekta : son ID est le nombre dans l'URL.")
+    mid = st.text_input("ID Vekta du coureur", key="vekta_mid")
+    mname = st.text_input("Nom à afficher (si l'ID marche)", key="vekta_mname")
+    if st.button("Ajouter ce coureur", key="vekta_madd"):
+        mid_clean = mid.strip()
+        if not mid_clean:
+            st.error("Colle d'abord l'ID du coureur.")
+        elif mid_clean in [m["id"] for m in manual_ids] or mid_clean in [a["id"] for a in riders]:
+            st.warning("Ce coureur est déjà dans la liste.")
+        else:
+            try:
+                client._get(f"/users/{mid_clean}")
+                manual_ids.append({"id": mid_clean, "name": mname.strip()})
+                st.success(f"ID {mid_clean} accepté par Vekta — coureur ajouté.")
+                st.rerun()
+            except PermissionError:
+                st.error("Refusé (403) : ce coureur n'a pas d'abonnement Vekta actif, "
+                         "ou il n'est pas dans tes workspaces.")
+            except LookupError:
+                st.error("Introuvable (404) : cet ID n'est pas un de tes athlètes.")
+            except RuntimeError as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error("Vekta injoignable : " + str(e)[:150])
+    if manual_ids and st.button("Retirer les coureurs ajoutés à la main", key="vekta_mclear"):
+        st.session_state["vekta_manual_ids"] = []
+        st.rerun()
+for mrec in manual_ids:
+    if mrec["id"] not in [a["id"] for a in riders]:
+        try:
+            client._get(f"/users/{mrec['id']}")
+            a = client.get_athlete(mrec["id"])
+            if a.get("id") == mrec["id"]:
+                if mrec["name"] and a.get("name") in (None, "", "?"):
+                    a["name"] = mrec["name"]
+                riders = riders + [a]
+        except Exception:
+            pass
+
 labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
 rider_id = st.sidebar.selectbox("Coureur", list(labels.keys()), format_func=lambda x: labels[x],
                                 key="fiche_rider")
