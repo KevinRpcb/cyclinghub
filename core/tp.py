@@ -16,6 +16,7 @@ import time
 from datetime import date, timedelta
 
 import requests
+import streamlit as st
 
 from .config import tp_password, tp_username
 
@@ -32,6 +33,9 @@ _FORM_HEADERS = {
 
 PEAK_SLOTS = [("p1m", "power1min"), ("p5m", "power5min"),
               ("p10m", "power10min"), ("p20m", "power20min")]
+BIKE_TYPE_IDS = {2, 8}
+RACE_TYPE_IDS = {6}
+TT_TITLE_WORDS = ("tt", "itt", "clm", "chrono", "contre-la-montre", "prologue", "time trial")
 
 
 class TPError(RuntimeError):
@@ -312,6 +316,60 @@ class TPClient:
                 best = (rank if rank is not None else 999, val)
         return best[1] if best else None
 
+    def get_cp_estimate(self, athlete_id) -> dict:
+        """CP estimée en 2 appels seulement (puissance 60 min, sinon 95 % de 20 min)."""
+        try:
+            p60 = self._peak(athlete_id, "power60min")
+            if p60:
+                return {"cp": int(round(p60))}
+            p20 = self._peak(athlete_id, "power20min")
+            if p20:
+                return {"cp": int(round(0.95 * p20))}
+        except Exception as e:
+            self._fallback(e)
+        return {}
+
+    def get_tt_efforts(self, athlete_id) -> list:
+        """Efforts vélo (120 jours) déduits des séances TP : date, durée, puissance.
+
+        Un effort est retenu si la séance est de type vélo avec puissance moyenne
+        et durée >= 5 min. 'course' si TP la marque Race, sinon 'entrainement'.
+        """
+        try:
+            start, end = self._date_range(120)
+            rows = self._get(f"/fitness/v6/athletes/{athlete_id}/workouts/{start}/{end}")
+            rows = rows if isinstance(rows, list) else []
+        except Exception as e:
+            self._fallback(e)
+            return []
+        out = []
+        for w in rows:
+            if not isinstance(w, dict):
+                continue
+            wtype = w.get("workoutTypeValueId")
+            title = str(w.get("title") or "").lower()
+            is_tt = (wtype in BIKE_TYPE_IDS
+                     or any(wd in title for wd in TT_TITLE_WORDS))
+            if not is_tt:
+                continue
+            dur_h = _num(w.get("totalTime"))
+            avg_w = _num(w.get("powerAverage"))
+            if not dur_h or dur_h * 3600 < 300 or not avg_w or avg_w <= 0:
+                continue
+            vel = _num(w.get("velocityAverage"))
+            out.append({k: v for k, v in {
+                "date": str(w.get("workoutDay") or "")[:10],
+                "type": "course" if wtype in RACE_TYPE_IDS else "entrainement",
+                "duration_s": int(round(dur_h * 3600)),
+                "avg_w": int(round(avg_w)),
+                "np_w": int(round(_num(w.get("normalizedPowerActual"))))
+                        if _num(w.get("normalizedPowerActual")) else None,
+                "speed_kmh": round(vel * 3.6, 1) if vel else None,
+                "gradient_pct": None,
+            }.items() if v is not None})
+        out.sort(key=lambda x: x.get("date", ""))
+        return out
+
     def get_power_profile(self, athlete_id: str) -> dict:
         prof = {}
         try:
@@ -332,3 +390,10 @@ class TPClient:
         except Exception as e:
             self._fallback(e)
         return prof
+
+
+def session_client() -> TPClient:
+    """TPClient mis en cache dans la session : un seul login par session Streamlit."""
+    if "tp_client" not in st.session_state:
+        st.session_state["tp_client"] = TPClient()
+    return st.session_state["tp_client"]

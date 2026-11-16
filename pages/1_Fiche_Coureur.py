@@ -5,7 +5,7 @@ import streamlit as st
 
 from core.auth import gate
 from core.vekta import VektaClient
-from core.tp import TPClient
+from core.tp import TPClient, session_client
 from core.physiology import compute_pmc, readiness, metric_comments, vfc_verdict
 from core.openrouter import chat, CURATED_MODELS, DEFAULT_MODEL
 from core.config import openrouter_key
@@ -16,7 +16,7 @@ gate()
 src = st.sidebar.radio("Source des données", ["Vekta (API)", "TrainingPeaks"], key="fiche_src")
 client = VektaClient()
 if src == "TrainingPeaks":
-    tp = TPClient()
+    tp = session_client()
     if not tp.configured:
         st.warning("TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD dans les Secrets "
                    "Streamlit (identifiants de ton compte coach TP) — Vekta est utilisée "
