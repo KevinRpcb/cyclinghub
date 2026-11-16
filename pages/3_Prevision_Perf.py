@@ -277,7 +277,7 @@ def _pacing_svg(parts, segs, total_km):
     svg.append(f'<polygon points="{tx(0):.1f},{py + ph} {poly} {tx(total_km):.1f},{py + ph}" '
                f'fill="#dbeafe" stroke="#3b82f6" stroke-width="1.6"/>')
 
-    for p in parts:
+    for i, p in enumerate(parts):
         x1, x2 = tx(p["km_start"]), tx(p["km_end"])
         col = _grad_color(p["grad"])
         svg.append(f'<rect x="{x1:.1f}" y="{py + ph - 6}" width="{max(x2 - x1, 1):.1f}" height="6" '
@@ -286,14 +286,20 @@ def _pacing_svg(parts, segs, total_km):
             svg.append(f'<line x1="{x1:.1f}" y1="{py}" x2="{x1:.1f}" y2="{py + ph}" '
                        f'stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>')
         cx = (x1 + x2) / 2
-        svg.append(f'<text x="{cx:.1f}" y="{py - 46}" text-anchor="middle" font-size="11" '
-                   f'font-family="Arial" font-weight="bold" fill="#334155">'
-                   f'Km {p["km_start"]:.0f}\u2013{p["km_end"]:.0f}</text>')
-        svg.append(f'<text x="{cx:.1f}" y="{py - 30}" text-anchor="middle" font-size="15" '
-                   f'font-family="Arial" font-weight="900" fill="{col}">{p["watts"]} W</text>')
+        bw, bh = 112, 56
+        bx = min(max(cx - bw / 2, PL), PL + cw - bw)
+        by = py + 8 if i % 2 == 0 else py + ph - bh - 8
+        svg.append(f'<rect x="{bx:.1f}" y="{by}" width="{bw}" height="{bh}" rx="6" '
+                   f'fill="#ffffff" fill-opacity="0.9" stroke="{col}" stroke-width="1.5"/>')
         mm, ss = divmod(int(round(p["time_s"])), 60)
-        svg.append(f'<text x="{cx:.1f}" y="{py - 16}" text-anchor="middle" font-size="10" '
-                   f'font-family="Arial" fill="#64748b">{mm}:{ss:02d}</text>')
+        bcx = bx + bw / 2
+        svg.append(f'<text x="{bcx:.1f}" y="{by + 15}" text-anchor="middle" font-size="10" '
+                   f'font-family="Arial" font-weight="bold" fill="#64748b">'
+                   f'P{p["n"]} \u00b7 {p["km_start"]:.0f}\u2013{p["km_end"]:.0f} km</text>')
+        svg.append(f'<text x="{bcx:.1f}" y="{by + 34}" text-anchor="middle" font-size="17" '
+                   f'font-family="Arial" font-weight="900" fill="{col}">{p["watts"]} W</text>')
+        svg.append(f'<text x="{bcx:.1f}" y="{by + 49}" text-anchor="middle" font-size="11" '
+                   f'font-family="Arial" fill="#334155">{mm}:{ss:02d}</text>')
 
         wk = p["wind_kmh"]
         if abs(wk) >= 1.5:
