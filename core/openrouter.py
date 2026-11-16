@@ -9,14 +9,10 @@ CURATED_MODELS = [
     "anthropic/claude-sonnet-4.5",
     "openai/gpt-4.1",
     "google/gemini-2.5-flash",
-    "x-ai/grok-3-mini",
     "deepseek/deepseek-chat-v3-0324",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "mistralai/mistral-small-3.2-24b-instruct:free",
-    "qwen/qwen3-235b-a22b:free",
 ]
 
-DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+DEFAULT_MODEL = "google/gemini-2.5-flash"
 
 
 def _headers(key: str) -> dict:
@@ -79,6 +75,36 @@ def list_models(key: str):
     except Exception:
         return False, "Réponse inattendue du endpoint /models."
     return True, ids
+
+
+def free_models():
+    """Modèles réellement gratuits (prix 0), détectés via l'endpoint public /models.
+
+    La liste des gratuits change souvent chez OpenRouter : on ne la code plus en dur.
+    Retourne (ok, ids | erreur).
+    """
+    try:
+        r = requests.get(f"{BASE_URL}/models", timeout=20)
+    except requests.RequestException as e:
+        return False, f"Erreur réseau : {e}"
+    if r.status_code != 200:
+        return False, f"HTTP {r.status_code}."
+    try:
+        ids = []
+        for m in r.json().get("data", []):
+            pricing = m.get("pricing") or {}
+            try:
+                if float(pricing.get("prompt", "1")) != 0 or float(pricing.get("completion", "1")) != 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            mods = (m.get("architecture") or {}).get("output_modalities")
+            if mods and "text" not in mods:
+                continue
+            ids.append(m["id"])
+        return True, sorted(ids)
+    except Exception:
+        return False, "Réponse inattendue du endpoint /models."
 
 
 def multi_consult(models: list, system: str, user: str, key: str,

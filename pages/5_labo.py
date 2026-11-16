@@ -2,7 +2,7 @@ import streamlit as st
 
 from core.auth import gate
 from core.config import openrouter_key
-from core.openrouter import chat, list_models, multi_consult, synthesize, CURATED_MODELS, DEFAULT_MODEL
+from core.openrouter import chat, list_models, free_models, multi_consult, synthesize, CURATED_MODELS
 from core.pubmed import search
 from core.vekta import VektaClient
 
@@ -15,6 +15,15 @@ st.caption("Sonde plusieurs IA en parallèle via OpenRouter, croise avec la litt
 
 key = openrouter_key()
 client = VektaClient()
+
+# Modèles gratuits détectés automatiquement (la liste d'OpenRouter change souvent)
+if "lab_free_models" not in st.session_state:
+    ok_free, free_ids = free_models()
+    st.session_state["lab_free_models"] = free_ids if ok_free else []
+free_ids = st.session_state["lab_free_models"]
+model_options = list(dict.fromkeys(free_ids + CURATED_MODELS))
+default_models = (free_ids[:3] or CURATED_MODELS[:3])
+fallback_model = (free_ids or CURATED_MODELS)[0]
 
 # ── Diagnostic clé ───────────────────────────────────────────────────────
 with st.expander("🔑 Diagnostic OpenRouter", expanded=not key):
@@ -49,9 +58,9 @@ SYSTEM = (
 tab1, tab2, tab3 = st.tabs(["📚 Veille PubMed critique", "💡 Brainstorming", "🧭 Sujets proposés par l'IA"])
 
 with tab1:
-    models = st.multiselect("IA à sonder", CURATED_MODELS,
-                            default=[CURATED_MODELS[5], CURATED_MODELS[6], CURATED_MODELS[7]],
-                            key="lab_models")
+    models = st.multiselect(
+        f"IA à sonder ({len(free_ids)} gratuites détectées automatiquement)",
+        model_options, default=default_models, key="lab_models")
     q = st.text_input("Mots-clés PubMed (anglais)", "heat acclimation cycling time trial")
     if st.button("🚀 Lancer l'analyse multi-IA", type="primary"):
         with st.spinner("Recherche PubMed…"):
@@ -86,7 +95,7 @@ with tab2:
                          "Propose 3 séances spécifiques pour corriger un découplage mécanique "
                          "observé chez un grimpeur à J-10 d'un grand tour.")
     if st.button("🧠 Consulter les IA", type="primary"):
-        results = multi_consult(models or [DEFAULT_MODEL], SYSTEM, sujet, key)
+        results = multi_consult(models or [fallback_model], SYSTEM, sujet, key)
         for r in results:
             with st.expander(f"🤖 {r['model']}", expanded=r["ok"]):
                 st.markdown(r["content"] if r["ok"] else f"❌ {r['content']}")
@@ -99,5 +108,5 @@ with tab3:
             "PRIORITAIRES (une ligne chacun : sujet + pourquoi maintenant + requête PubMed "
             "anglaise prête à copier). Base-toi sur les signaux faibles des données."
         )
-        ok, content = chat(DEFAULT_MODEL, [{"role": "user", "content": prompt}], key, max_tokens=1200)
+        ok, content = chat(fallback_model, [{"role": "user", "content": prompt}], key, max_tokens=1200)
         st.markdown(content if ok else f"❌ {content}")
