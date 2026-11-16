@@ -21,7 +21,8 @@ elif client.notice:
 
 manual_ids = st.session_state.setdefault("vekta_manual_ids", [])
 with st.sidebar.expander("➕ Ajouter un coureur Vekta par son ID"):
-    st.caption("Ouvre le profil du coureur dans l'app Vekta : son ID est le nombre dans l'URL.")
+    st.caption("Ouvre le profil du coureur dans l'app Vekta : copie l'identifiant complet depuis "
+               "l'URL (ex. usr_abc123), avec le préfixe usr_ et tout ce qui suit.")
     mid = st.text_input("ID Vekta du coureur", key="vekta_mid")
     mname = st.text_input("Nom à afficher (si l'ID marche)", key="vekta_mname")
     if st.button("Ajouter ce coureur", key="vekta_madd"):
