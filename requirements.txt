@@ -1,6 +1,7 @@
-streamlit
-pandas
-numpy
-plotly
-requests
-biopython
+streamlit>=1.36
+pandas>=2.0
+numpy>=1.26
+plotly>=5.20
+requests>=2.31
+biopython>=1.83
+fitdecode>=0.10
