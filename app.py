@@ -46,9 +46,9 @@ st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 st.markdown("---")
 c1, c2, c3, c4 = st.columns(4)
 c1.page_link("pages/1_Fiche_Coureur.py", label="🧑‍⚕️ Fiche coureur", icon="🧑‍⚕️")
-c2.page_link("pages/2_TT_Center.py", label="⏱️ TT Center", icon="⏱️")
-c3.page_link("pages/3_Prevision_Perf.py", label="🎯 Prévision de perf", icon="🎯")
-c4.page_link("pages/5_Labo.py", label="🔬 Labo scientifique", icon="🔬")
+c2.page_link("pages/2_Plannif_Annuel.py", label="🗓️ Plannif annuel", icon="🗓️")
+c3.page_link("pages/3_TT_Center.py", label="⏱️ TT Center", icon="⏱️")
+c4.page_link("pages/4_Prevision_Perf.py", label="🎯 Prévision de perf", icon="🎯")
 
 st.caption("Sécurité : accès par mot de passe (comparaison à temps constant), clés uniquement dans "
            "les Secrets Streamlit, appels réseau avec timeout, fichiers uploadés validés.")
