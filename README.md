@@ -19,11 +19,11 @@ core/
   powermodel.py           Modèle CP, SCx, vitesses, puissance normalisée
   course.py               GPX/FIT, segments, météo Open-Meteo, pacing
 pages/
-  1_fiche_coureur.py      Page par coureur : métriques + analyse IA complète
-  2_tt_center.py          Suivi efforts CLM, PPR, estimation SCx, cible rapide
-  3_prevision_perf.py     GPX/FIT → pacing + watts (type BestBikeSplit)
-  4_echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
-  5_labo.py               Veille PubMed multi-IA, brainstorming, propositions
+  1_Fiche_Coureur.py      Page par coureur : métriques + analyse IA complète
+  2_TT_Center.py          Suivi efforts CLM, PPR, estimation SCx, cible rapide
+  3_Prevision_Perf.py     GPX/FIT → pacing + watts (type BestBikeSplit)
+  4_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
+  5_Labo.py               Veille PubMed multi-IA, brainstorming, propositions
 ```
 
 ## Secrets requis (Streamlit Cloud → App → Settings → Secrets)
