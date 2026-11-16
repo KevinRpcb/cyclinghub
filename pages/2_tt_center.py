@@ -34,14 +34,17 @@ with t1:
     st.subheader("Efforts sur le vélo CLM — course & entraînement")
     df = pd.DataFrame(efforts_all)
     if not df.empty:
+        for col in ("np_w", "speed_kmh", "gradient_pct", "type"):
+            if col not in df.columns:
+                df[col] = np.nan
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date", ascending=False)
         show = df.copy()
         show["IF"] = (show["avg_w"] / pp["cp"]).round(2)
-        show["W/kg"] = (show["avg_w"] / athlete["weight"]).round(1)
+        show["W/kg"] = (show["avg_w"] / max(float(athlete.get("weight", 0) or 0), 1)).round(1)
         show["dur_min"] = (show["duration_s"] / 60).round(1)
         st.dataframe(show[["date", "type", "dur_min", "avg_w", "np_w", "IF", "W/kg",
-                           "speed_kmh", "gradient_pct"]],
+                           "speed_kmh", "gradient_pct"]].fillna("n/c"),
                      use_container_width=True, hide_index=True)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df["date"], y=df["avg_w"], mode="lines+markers",
