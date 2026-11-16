@@ -21,7 +21,7 @@ def vekta_key() -> str:
 
 
 def vekta_base_url() -> str:
-    return get_secret("VEKTA_BASE_URL", "https://api.vekta.com/v1")
+    return get_secret("VEKTA_BASE_URL", "https://api.joinvekta.com")
 
 
 def pubmed_email() -> str:

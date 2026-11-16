@@ -32,7 +32,12 @@ Voir `.streamlit/secrets.toml.example` pour le modèle complet :
 
 - `APP_PASSWORD` — mot de passe d'accès équipe (obligatoire).
 - `OPENROUTER_API_KEY` — clé OpenRouter (pages coureur + labo).
-- `VEKTA_API_KEY`, `VEKTA_BASE_URL` — pont API Vekta (à aligner sur la doc Vekta).
+- `VEKTA_API_KEY` — clé à générer dans Vekta → Settings → API keys
+  (https://app.joinvekta.com/me/settings/api-keys). L'app interroge
+  `https://api.joinvekta.com` (`/users`, métriques, sommeil, wellness,
+  activités, best-efforts) ; `VEKTA_BASE_URL` est optionnel (défaut correct
+  dans le code). Sans clé ou sans abonnement actif côté athlète, des données
+  de démonstration sont affichées avec un avertissement.
 - `PUBMED_EMAIL`, `PUBMED_API_KEY` (optionnel) — identifie les requêtes PubMed.
 - `[WU_PROTOCOLS.*]` — **les détails chiffrés des protocoles d'échauffement
   restent privés** : le code ne contient que les titres. Colle la table
