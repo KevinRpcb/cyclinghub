@@ -256,13 +256,13 @@ class TPClient:
             return [r for r in data if isinstance(r, dict)]
         return []
 
-    def get_metrics(self, athlete_id: str) -> dict:
+    def get_metrics(self, athlete_id: str, days: int = 120) -> dict:
         try:
-            start, end = self._date_range(120)
+            start, end = self._date_range(days)
             rows = self.get_fitness(athlete_id, start, end)
             if not rows:
-                raise TPError("aucune métrique Fitness lisible dans TrainingPeaks "
-                              "(120 derniers jours)")
+                raise TPError(f"aucune métrique Fitness lisible dans TrainingPeaks "
+                              f"({days} derniers jours)")
             rows.sort(key=lambda r: str(r.get("workoutDay") or ""))
             last = rows[-1]
             tss = [max(0.0, _num(r.get("tssActual")) or 0.0) for r in rows]
@@ -329,14 +329,14 @@ class TPClient:
             self._fallback(e)
         return {}
 
-    def get_tt_efforts(self, athlete_id) -> list:
-        """Efforts vélo (120 jours) déduits des séances TP : date, durée, puissance.
+    def get_tt_efforts(self, athlete_id, days: int = 120) -> list:
+        """Efforts vélo (fenêtre `days` jours) déduits des séances TP : date, durée, puissance.
 
         Un effort est retenu si la séance est de type vélo avec puissance moyenne
         et durée >= 5 min. 'course' si TP la marque Race, sinon 'entrainement'.
         """
         try:
-            start, end = self._date_range(120)
+            start, end = self._date_range(days)
             rows = self._get(f"/fitness/v6/athletes/{athlete_id}/workouts/{start}/{end}")
             rows = rows if isinstance(rows, list) else []
         except Exception as e:
