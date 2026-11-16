@@ -205,7 +205,7 @@ with right:
 
     st.subheader("🧠 Analyse IA complète (toutes les métriques)")
     model = st.selectbox("Modèle", CURATED_MODELS, index=CURATED_MODELS.index(DEFAULT_MODEL), key="fiche_model")
-    if st.button("Générer l'analyse niveau staff World Tour", type="primary"):
+    if st.button("Générer l'analyse", type="primary"):
         context = {
             "coureur": athlete,
             "metriques": m,
