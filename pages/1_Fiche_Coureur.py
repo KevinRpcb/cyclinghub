@@ -7,6 +7,7 @@ from core.auth import gate
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
 from core.physiology import compute_pmc, readiness, metric_comments, vfc_verdict
+from core.powermodel import fit_cp_model
 from core.openrouter import chat, CURATED_MODELS, DEFAULT_MODEL
 from core.config import openrouter_key
 
@@ -192,6 +193,14 @@ with right:
         if pp.get(key):
             xs.append(sec)
             ys.append(pp[key])
+    if not xs and hasattr(client, "get_tt_efforts"):
+        pp_eff = client.get_tt_efforts(rider_id)
+        pts = [(e["duration_s"], e["avg_w"]) for e in pp_eff
+               if e.get("duration_s") and e.get("avg_w")]
+        mdl = fit_cp_model(pts)
+        if mdl:
+            xs = [p[0] for p in mdl["points"]]
+            ys = [p[1] for p in mdl["points"]]
     if xs:
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers+text", name="PPR",
@@ -201,7 +210,12 @@ with right:
         fig.update_yaxes(title="Puissance (W)")
         fig.update_layout(height=320, template="plotly_white", margin=dict(l=10, r=10, t=20, b=10))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption(f"CP lissée : **{pp.get('cp','?')} W** ({pp.get('cp',0)/max(athlete.get('weight',1),1):.1f} W/kg)")
+        if pp.get("cp"):
+            st.caption(f"CP lissée : **{pp.get('cp','?')} W** "
+                       f"({pp.get('cp',0)/max(athlete.get('weight',1),1):.1f} W/kg)")
+    else:
+        st.info("Profil de puissance indisponible pour ce coureur — ajoute des efforts "
+                "avec puissance (CLM) ou vérifie la source de données.")
 
     st.subheader("🧠 Analyse IA complète (toutes les métriques)")
     model = st.selectbox("Modèle", CURATED_MODELS, index=CURATED_MODELS.index(DEFAULT_MODEL), key="fiche_model")

@@ -100,9 +100,22 @@ with t1:
     pts += [(s, pp[k]) for k, s in [("p1m", 60), ("p3m", 180), ("p5m", 300),
                                     ("p10m", 600), ("p20m", 1200)] if pp.get(k)]
     model = fit_cp_model(pts)
+    if not model and pp.get("cp") and pp.get("p20m"):
+        wprime_fb = (float(pp["p20m"]) - float(pp["cp"])) * 1200.0
+        if wprime_fb > 0:
+            model = {"cp": float(pp["cp"]), "wprime": wprime_fb,
+                     "points": [(s2, pp[k]) for k, s2 in
+                                [("p1m", 60), ("p3m", 180), ("p5m", 300),
+                                 ("p10m", 600), ("p20m", 1200)] if pp.get(k)],
+                     "rmse": 0.0, "excluded": [], "fallback": True}
     if model:
-        st.success(f"CP = **{model['cp']:.0f} W** · W′ = **{model['wprime']/1000:.1f} kJ** "
-                   f"(RMSE {model['rmse']:.0f} W sur {len(model['points'])} points)")
+        if model.get("fallback"):
+            st.info("Pas assez d'efforts maximaux pour ajuster le modèle CP "
+                    "(il faut au moins 2 efforts de durées différentes). "
+                    "Courbe tracée à partir du profil — ajoute des efforts CLM pour l'affiner.")
+        else:
+            st.success(f"CP = **{model['cp']:.0f} W** · W′ = **{model['wprime']/1000:.1f} kJ** "
+                       f"(RMSE {model['rmse']:.0f} W sur {len(model['points'])} points)")
         if model.get("excluded"):
             ex = ", ".join(f"{round(t/60)}′ @ {p} W" for t, p in model["excluded"])
             st.caption(f"Efforts écartés du modèle (non maximaux, ils tiraient la CP vers "
