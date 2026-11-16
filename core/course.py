@@ -77,6 +77,37 @@ def parse_fit(data: bytes) -> list:
     return pts
 
 
+def parse_fit_activity(data: bytes) -> list:
+    """Lit les record messages d'une ACTIVITÉ .fit (course réelle) :
+    time, dist, power, speed, ele, lat/lon (déjà convertis en degrés)."""
+    import fitdecode
+    rows = []
+    with fitdecode.FitReader(io.BytesIO(data)) as fit:
+        for frame in fit:
+            if not isinstance(frame, fitdecode.FitDataMessage) \
+                    or frame.name != "record":
+                continue
+
+            def get(name, _f=frame):
+                try:
+                    return _f.get_value(name)
+                except (KeyError, ValueError):
+                    return None
+
+            lat, lon = get("position_lat"), get("position_long")
+            if lat is not None:
+                lat = lat * 180.0 / 2 ** 31
+            if lon is not None:
+                lon = lon * 180.0 / 2 ** 31
+            rows.append({"time": get("timestamp"),
+                         "dist": get("distance"),
+                         "power": get("power"),
+                         "speed": get("speed"),
+                         "ele": get("enhanced_altitude") or get("altitude"),
+                         "lat": lat, "lon": lon})
+    return rows
+
+
 def parse_course(data: bytes, name: str) -> list:
     low = name.lower()
     if low.endswith(".gpx"):
