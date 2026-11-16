@@ -1,3 +1,5 @@
+import base64
+import html as _html
 import io
 import math
 from datetime import datetime
@@ -5,6 +7,7 @@ from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.auth import gate
 from core.config import wu_protocols
@@ -342,6 +345,12 @@ if assessment and assessment["level"] != "ok":
 elif assessment:
     st.success(f"✅ Conditions confortables (ressenti {assessment['at']:.0f} °C)")
 
+with st.expander("🖼️ Logo, profil & carte (pour le document à imprimer)"):
+    ic1, ic2, ic3 = st.columns(3)
+    ic1.file_uploader("Logo de course", type=["png", "jpg", "jpeg"], key="wu_img_logo")
+    ic2.file_uploader("Profil (altimétrie)", type=["png", "jpg", "jpeg"], key="wu_img_profile")
+    ic3.file_uploader("Carte du parcours", type=["png", "jpg", "jpeg"], key="wu_img_map")
+
 # ════════════════════════════════════════════════════════════════════════
 # PROTOCOLE GLOBAL + ÉDITEUR CUSTOM
 # ════════════════════════════════════════════════════════════════════════
@@ -383,12 +392,10 @@ with st.expander("✏️ Éditeur de protocole custom", expanded=proto_id == "cu
                        f"{st.session_state.get('wu_custom_name') or 'custom_protocol'}.json",
                        "application/json")
 
-custom_steps = []
-if proto_id == "custom":
-    custom_steps = edited.to_dict("records")
-    if not custom_steps:
-        st.warning("Le protocole custom est vide — ajoute des blocs dans l'éditeur.")
-        st.stop()
+custom_steps = edited.to_dict("records")
+if proto_id == "custom" and not custom_steps:
+    st.warning("Le protocole custom est vide — ajoute des blocs dans l'éditeur.")
+    st.stop()
 
 # ════════════════════════════════════════════════════════════════════════
 # COUREURS (slots) + SURCHARGE PAR COUREUR
@@ -420,9 +427,46 @@ def rider_by_name(name):
     return next(r for r in riders if r["name"] == name)
 
 
-for name in selected:
+def rider_plan(name):
     r = rider_by_name(name)
     ov_id, proto = get_proto_for(name)
+    ov = st.session_state.setdefault(f"wu_ov_{name}", {})
+    if ov_id == "custom":
+        segs, t = [], 0.0
+        for dur, spec, zone in expand_custom(custom_steps):
+            w = 80 if spec is None else custom_step_watts(*spec, r)
+            segs.append((t, t + dur, w, "easy" if spec is None else spec[0]))
+            t += dur
+        cvals = None
+        blocks = []
+        for s in custom_steps:
+            zm = ZONE_META[s["zone"]]
+            w = custom_step_watts(s["zone"], s["ref"], s["pct"], r)
+            lbl = (f"{int(s['reps'])}×{min_to_str(s['work_min'])}" if s["reps"] > 1
+                   else min_to_str(s["work_min"]))
+            if s["rec_min"] > 0 and s["reps"] > 1:
+                lbl += f" r{min_to_str(s['rec_min'])}"
+            blocks.append((zm, lbl, w))
+    else:
+        cvals = calc_all(proto, r, ov)
+        segs = build_segments(proto, cvals)
+        z3dur = sum(proto["z3blocks"]) + proto["z3easy"]
+        z4str = f"{proto['z4reps']}×{min_to_str(proto['z4work'])} r{min_to_str(proto['z4rec'])}"
+        z5str = f"{proto['z5reps']}×{min_to_str(proto['z5work'])}/{min_to_str(proto['z5rec'])}"
+        blocks = [
+            (ZONE_META["z3"], f"{min_to_str(z3dur)} progression Z3 ({'+'.join(min_to_str(b) for b in proto['z3blocks'])})", cvals["z3cap"]),
+            (ZONE_META["z4"], f"{z4str} Z4", cvals["z4hi"]),
+        ]
+        if proto["z5reps"] > 0:
+            blocks.append((ZONE_META["z5"], f"{z5str} Z5", cvals["z5hi"]))
+        if proto["sprintReps"] > 0:
+            blocks.append((ZONE_META["sprint"],
+                           f"{proto['sprintReps']}×{min_to_str(sprint_work(proto))} Sprint assis", None))
+    return r, ov_id, proto, cvals, segs, blocks
+
+
+for name in selected:
+    r, ov_id, proto, cvals, segs, blocks = rider_plan(name)
     ov = st.session_state.setdefault(f"wu_ov_{name}", {})
 
     with st.container(border=True):
@@ -440,38 +484,6 @@ for name in selected:
             st.session_state[f"wu_override_{name}"] = override
             st.session_state[f"wu_ov_{name}"] = {}
             st.rerun()
-
-        if ov_id == "custom":
-            segs, t = [], 0.0
-            for dur, spec, zone in expand_custom(custom_steps):
-                w = 80 if spec is None else custom_step_watts(*spec, r)
-                segs.append((t, t + dur, w, "easy" if spec is None else spec[0]))
-                t += dur
-            cvals = None
-            blocks = []
-            for s in custom_steps:
-                zm = ZONE_META[s["zone"]]
-                w = custom_step_watts(s["zone"], s["ref"], s["pct"], r)
-                lbl = (f"{int(s['reps'])}×{min_to_str(s['work_min'])}" if s["reps"] > 1
-                       else min_to_str(s["work_min"]))
-                if s["rec_min"] > 0 and s["reps"] > 1:
-                    lbl += f" r{min_to_str(s['rec_min'])}"
-                blocks.append((zm, lbl, w))
-        else:
-            cvals = calc_all(proto, r, ov)
-            segs = build_segments(proto, cvals)
-            z3dur = sum(proto["z3blocks"]) + proto["z3easy"]
-            z4str = f"{proto['z4reps']}×{min_to_str(proto['z4work'])} r{min_to_str(proto['z4rec'])}"
-            z5str = f"{proto['z5reps']}×{min_to_str(proto['z5work'])}/{min_to_str(proto['z5rec'])}"
-            blocks = [
-                (ZONE_META["z3"], f"{min_to_str(z3dur)} progression Z3 ({'+'.join(min_to_str(b) for b in proto['z3blocks'])})", cvals["z3cap"]),
-                (ZONE_META["z4"], f"{z4str} Z4", cvals["z4hi"]),
-            ]
-            if proto["z5reps"] > 0:
-                blocks.append((ZONE_META["z5"], f"{z5str} Z5", cvals["z5hi"]))
-            if proto["sprintReps"] > 0:
-                blocks.append((ZONE_META["sprint"],
-                               f"{proto['sprintReps']}×{min_to_str(sprint_work(proto))} Sprint assis", None))
 
         fig = go.Figure()
         xs, ys = [0.0], [80]
@@ -518,18 +530,214 @@ for name in selected:
                         st.session_state[f"wu_ov_{name}"] = {}
                         st.rerun()
 
-        with st.expander("✂️ Autocollant guidon (4×7 cm)"):
-            cond_strip = ""
-            if assessment and assessment["level"] in ("hot", "extreme", "cold2"):
-                cond_strip = f"**{assessment['label']}**  \n"
-            lines = [f"{cond_strip}**{r['name']}** · {proto['duration']}' warm-up"]
-            for zm, lbl, w in blocks:
-                watts = "MAX" if w is None else f"{w} W"
-                lines.append(f":{zm['color']}[{zm['emoji']} {lbl} — {zm['label']} `{watts}`]")
-            if cvals:
-                lines.append("HR Z3 : " + " → ".join(str(v) for v in cvals["z3hr"]) + " bpm")
-            st.markdown("  \n".join(lines))
-            st.caption("Imprime cette section (Ctrl+P) et découpe le long des bordures.")
+# ─── Document à imprimer (page 1 : course + images + grand graphique ; pages suivantes : autocollants) ───
+_FILL = {"z3": "#bbf7d0", "z4": "#fef08a", "z5": "#fecaca", "easy": "#f1f5f9", "sprint": "#ffccbc"}
+_STROKE = {"z3": "#16a34a", "z4": "#d97706", "z5": "#dc2626", "easy": "#cbd5e1", "sprint": "#ff5722"}
+
+_PRINT_CSS = """
+@page{size:A4 portrait;margin:10mm}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+body{font-family:Arial,Helvetica,sans-serif;color:#111318;margin:0;background:#fff;font-size:12px}
+.printbtn{position:fixed;top:8px;right:8px;background:#111318;color:#fff;border:none;border-radius:6px;padding:10px 18px;font-weight:bold;font-size:14px;cursor:pointer;z-index:99}
+@media print{.printbtn{display:none!important}}
+.hero{background:#111318;color:#fff;border-radius:3mm;padding:4mm 5mm;display:flex;align-items:center;gap:5mm}
+.hero img.logo{max-height:15mm;max-width:26mm;object-fit:contain}
+.logo-ph{min-width:22mm;height:12mm;border:1px solid rgba(255,255,255,.4);border-radius:2mm;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.5);font-size:9px}
+.hero-mid{flex:1}
+.kicker{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.6)}
+.title{font-size:20px;font-weight:900;letter-spacing:1px}
+.sub{font-size:11px;color:rgba(255,255,255,.7)}
+.tot{text-align:center;background:rgba(255,255,255,.12);border-radius:2mm;padding:2mm 4mm}
+.tot span{display:block;font-size:8px;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.6)}
+.tot b{font-size:20px}
+.tot i{display:block;font-style:normal;font-size:9px;color:#f7e982}
+.racebar{display:flex;border:1px solid #dde0e8;border-top:none;border-radius:0 0 2mm 2mm;margin-bottom:3mm}
+.racebar div{flex:1;padding:2mm 3mm;border-right:1px solid #dde0e8}
+.racebar div:last-child{border-right:none}
+.racebar i{display:block;font-style:normal;font-size:8px;letter-spacing:1px;text-transform:uppercase;color:#7a8194}
+.racebar b{font-size:12px}
+.media{display:flex;gap:3mm;margin-bottom:3mm}
+.panel{flex:1;border:1px solid #dde0e8;border-radius:2mm;padding:2mm}
+.panel i{display:block;font-style:normal;font-size:8px;letter-spacing:1px;text-transform:uppercase;color:#7a8194;margin-bottom:1mm}
+.panel img{width:100%;height:42mm;object-fit:cover;border-radius:1mm}
+.ph{height:42mm;border:1px dashed #c8ccd6;border-radius:1mm;display:flex;align-items:center;justify-content:center;color:#a0a6b5;font-size:10px}
+.chartbox{border:1px solid #dde0e8;border-radius:2mm;padding:2mm;margin-bottom:3mm}
+.chartbox i{display:block;font-style:normal;font-size:8px;letter-spacing:1px;text-transform:uppercase;color:#7a8194;margin-bottom:1mm}
+.pills{display:flex;flex-wrap:wrap;gap:2mm}
+.pill{color:#fff;border-radius:2mm;padding:1.5mm 3mm;min-width:30mm}
+.pill b{display:block;font-size:11px}
+.pill span{font-size:8px;opacity:.9}
+.cond{margin-top:3mm;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:2mm;padding:2mm 3mm;font-size:10px;font-weight:bold}
+.pagebreak{page-break-after:always}
+.stk-title{font-size:14px;letter-spacing:1px;text-transform:uppercase;margin:0 0 1mm}
+.stk-sub{font-size:10px;color:#7a8194;margin:0 0 3mm}
+.stickers{display:flex;flex-wrap:wrap;gap:4mm}
+.sticker{width:58mm;height:86mm;border:1px dashed #94a3b8;border-radius:2mm;overflow:hidden;page-break-inside:avoid;display:flex;flex-direction:column}
+.sk-hdr{background:#111318;color:#fff;padding:2mm 3mm;display:flex;justify-content:space-between;align-items:baseline}
+.sk-hdr span{font-size:8px;letter-spacing:1px;text-transform:uppercase;color:#f7e982}
+.sk-hdr b{font-size:13px;text-transform:uppercase}
+.sk-body{padding:1mm 0;flex:1}
+.band{display:flex;justify-content:space-between;align-items:center;padding:1.4mm 2.5mm;color:#fff;font-size:9px;font-weight:bold;margin:1mm 1.5mm;border-radius:1.5mm}
+.band b{font-size:10px}
+.sk-hr{padding:1mm 2.5mm;font-size:8px;color:#475569;text-align:center}
+.sk-foot{padding:1.5mm 2.5mm;font-size:8px;color:#7a8194;border-top:1px solid #dde0e8}
+"""
+
+
+def _img_uri(up):
+    if up is None:
+        return ""
+    return "data:" + (up.type or "image/png") + ";base64," + base64.b64encode(up.getvalue()).decode()
+
+
+def _esc(txt):
+    return _html.escape(str(txt if txt else "—"))
+
+
+def _svg_chart(segs, duration, w=560, h=130, pl=44, pr=16, pt=12, pb=26, fs=10):
+    cw, ch = w - pl - pr, h - pt - pb
+    maxw = max([s[2] for s in segs] + [1]) * 1.08
+    def tx(t):
+        return pl + (t / max(float(duration), 0.1)) * cw
+    def ty(v):
+        return pt + ch - (min(v, maxw) / maxw) * ch
+    bars, pts = [], []
+    for t0, t1, v, z in segs:
+        x1, x2 = tx(t0), tx(t1)
+        bars.append(f'<rect x="{x1:.1f}" y="{ty(v):.1f}" width="{x2 - x1:.1f}" '
+                    f'height="{ty(0) - ty(v):.1f}" fill="{_FILL[z]}" stroke="{_STROKE[z]}" stroke-width="0.4"/>')
+        pts.append(f"{x1:.1f},{max(pt, ty(v)):.1f} {x2:.1f},{max(pt, ty(v)):.1f}")
+    ticks = list(range(0, int(duration) + 1, 5))
+    if round(duration) not in ticks:
+        ticks.append(round(duration))
+    tl = "".join(f'<text x="{tx(t):.1f}" y="{h - 4}" text-anchor="middle" fill="#64748b" '
+                 f'font-size="{fs}" font-family="Arial">{t}\'</text>' for t in ticks)
+    return (f'<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">'
+            f'<rect x="{pl}" y="{pt}" width="{cw}" height="{ch}" fill="#f8fafc"/>{"".join(bars)}'
+            f'<polyline points="{" ".join(pts)}" fill="none" stroke="#64748b" stroke-width="0.8"/>'
+            f'<line x1="{pl}" y1="{pt + ch}" x2="{pl + cw}" y2="{pt + ch}" stroke="#cbd5e1" stroke-width="1"/>{tl}</svg>')
+
+
+def _proto_pills(proto):
+    es = easy_start(proto)
+    z3d = sum(proto["z3blocks"]) + proto["z3easy"]
+    z4d = proto["z4reps"] * (proto["z4work"] + proto["z4rec"])
+    e = proto["easyAfterZ4"]
+    z5d = proto["z5reps"] * (proto["z5work"] + proto["z5rec"])
+    sp = max(0.0, proto["duration"] - es - z3d - z4d - e - z5d)
+    pills = []
+    if es > 0:
+        pills.append(("#64748b", f"{min_to_str(es)} Easy", "départ progressif"))
+    pills.append(("#16a34a", f"{min_to_str(z3d)} Z3",
+                  f"{'+'.join(min_to_str(b) for b in proto['z3blocks'])} + {min_to_str(proto['z3easy'])} easy · HR "
+                  + "→".join(f"{round(p * 100)}%" for p in proto["z3pctHR"])))
+    pills.append(("#d97706", f"{min_to_str(z4d)} Z4",
+                  f"{proto['z4reps']}×{min_to_str(proto['z4work'])} r{min_to_str(proto['z4rec'])} · "
+                  f"{round(proto['z4loPct'] * 100)}–{round(proto['z4hiPct'] * 100)}% CP"))
+    if e > 0:
+        pills.append(("#64748b", f"{min_to_str(e)} Easy", "récup active"))
+    if proto["z5reps"] > 0:
+        pills.append(("#dc2626", f"{min_to_str(z5d)} Z5",
+                      f"{proto['z5reps']}×{min_to_str(proto['z5work'])}/{min_to_str(proto['z5rec'])} · "
+                      f"{round(proto['z5loPct'] * 100)}% CP"))
+    pills.append(("#ff5722",
+                  f"{proto['sprintReps']}×10'' Sprint" if proto["sprintReps"] > 0 else "Sans sprint",
+                  f"{min_to_str(sp)} easy · assis"))
+    return pills
+
+
+def _custom_pills(steps):
+    grouped = {}
+    for dur, spec, zone in expand_custom(steps):
+        grouped[zone] = grouped.get(zone, 0.0) + dur
+    return [(ZONE_META[z]["color"], f"{min_to_str(d)} {ZONE_META[z]['label']}", ZONE_META[z]["emoji"])
+            for z, d in grouped.items()]
+
+
+def _sticker_html(r, proto, cvals, segs, blocks):
+    chart = _svg_chart(segs, proto["duration"], w=154, h=46, pl=3, pr=3, pt=2, pb=8, fs=5)
+    band_html = []
+    for zm, lbl, w in blocks:
+        wtxt = "MAX" if w is None else f"{w} W"
+        band_html.append(f'<div class="band" style="background:{zm["color"]}">'
+                         f'<span>{zm["emoji"]} {_esc(lbl)}</span><b>{wtxt}</b></div>')
+    hr = ""
+    if cvals:
+        hr = (f'<div class="sk-hr">HR Z3 {"→".join(str(v) for v in cvals["z3hr"])} bpm · '
+              f'Z4 {cvals["z4lo"]}–{cvals["z4hi"]} W · Z5 {cvals["z5lo"]}–{cvals["z5hi"]} W</div>')
+    return (f'<div class="sticker"><div class="sk-hdr"><span>{proto["duration"]}\' warm-up</span>'
+            f'<b>{_esc(r["name"])}</b></div>{chart}<div class="sk-body">{"".join(band_html)}{hr}</div>'
+            f'<div class="sk-foot">CP {r["cp"]} W · {float(r["weight"]):.0f} kg · FCmax {r["hrmax"]}</div></div>')
+
+
+def build_print_doc(race, stage, date_str, dist, proto_label, gduration, pills, bus_chart,
+                    plans, images, assessment):
+    logo, profile, carte = images
+    logo_html = f'<img class="logo" src="{logo}">' if logo else '<div class="logo-ph">Logo</div>'
+
+    def media(uri, label):
+        return f'<img src="{uri}">' if uri else f'<div class="ph">{label}</div>'
+
+    cond = ""
+    if assessment and assessment["level"] != "ok":
+        cond = (f'<div class="cond">{_esc(assessment["label"])} — '
+                f'{_esc(" · ".join(assessment["actions"]))}</div>')
+    pills_html = "".join(
+        f'<div class="pill" style="background:{color}"><b>{_esc(main)}</b><span>{_esc(sub)}</span></div>'
+        for color, main, sub in pills)
+    stickers = "".join(_sticker_html(p[0], p[2], p[3], p[4], p[5]) for p in plans)
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>{_PRINT_CSS}</style></head><body>
+<button class="printbtn" onclick="window.print()">🖨️ Imprimer</button>
+<div class="hero">{logo_html}<div class="hero-mid"><div class="kicker">Protocole du jour</div>
+<div class="title">Échauffement WU24</div><div class="sub">{_esc(race)} · {_esc(stage)}</div></div>
+<div class="tot"><span>Total</span><b>{gduration}'</b><i>{_esc(proto_label)}</i></div></div>
+<div class="racebar">
+<div><i>Course</i><b>{_esc(race)}</b></div><div><i>Étape</i><b>{_esc(stage)}</b></div>
+<div><i>Date</i><b>{_esc(date_str)}</b></div><div><i>Distance</i><b>{_esc(dist)}</b></div></div>
+<div class="media"><div class="panel"><i>Profil</i>{media(profile, "Ajoute le profil dans l'app")}</div>
+<div class="panel"><i>Carte</i>{media(carte, "Ajoute la carte dans l'app")}</div></div>
+<div class="chartbox"><i>Allure du protocole — {gduration} min</i>{bus_chart}</div>
+<div class="pills">{pills_html}</div>{cond}</div>
+<div class="pagebreak"></div>
+<h2 class="stk-title">{_esc(race)} — {_esc(stage)}</h2>
+<p class="stk-sub">{_esc(date_str)} · échauffement {gduration}' · découpe le long des pointillés</p>
+<div class="stickers">{stickers}</div></body></html>"""
+
+
+_pseudo = {"cp": 400, "hrmax": 200, "p10s": 1000, "weight": 70.0}
+if proto_id == "custom":
+    bus_segs, _bt = [], 0.0
+    for dur, spec, zone in expand_custom(custom_steps):
+        w = 80 if spec is None else custom_step_watts(*spec, _pseudo)
+        bus_segs.append((_bt, _bt + dur, w, "easy" if spec is None else spec[0]))
+        _bt += dur
+    bus_pills = _custom_pills(custom_steps)
+    gduration = round(proto_duration_custom(custom_steps), 1)
+    proto_label = f"✏️ {st.session_state.get('wu_custom_name') or 'Custom'}"
+else:
+    gp = PROTOCOLS[proto_id]
+    bus_segs = build_segments(gp, calc_all(gp, _pseudo, {}))
+    bus_pills = _proto_pills(gp)
+    gduration = gp["duration"]
+    proto_label = f"{gp['emoji']} {gp['name']}"
+bus_chart = _svg_chart(bus_segs, gduration)
+
+st.divider()
+st.subheader("🖨️ Document à imprimer")
+st.caption("Page 1 : course, logo, profil, carte + grand graphique. Pages suivantes : un autocollant "
+           "par coureur sélectionné (58×86 mm, découpe). Clique sur « 🖨️ Imprimer » dans le document.")
+if st.button("👁️ Préparer le document à imprimer", key="wu_print_prep"):
+    st.session_state["wu_print_open"] = True
+if st.session_state.get("wu_print_open"):
+    if st.button("❌ Masquer le document", key="wu_print_hide"):
+        st.session_state["wu_print_open"] = False
+        st.rerun()
+    images = tuple(_img_uri(st.session_state.get(k))
+                   for k in ("wu_img_logo", "wu_img_profile", "wu_img_map"))
+    plans = [rider_plan(n) for n in selected]
+    doc = build_print_doc(race, stage, rdate.strftime("%d/%m/%Y"), dist, proto_label, gduration,
+                          bus_pills, bus_chart, plans, images, assessment)
+    components.html(doc, height=1100, scrolling=True)
 
 st.divider()
 st.caption("Zones ancrées sur la CP du coureur (source : " +
