@@ -3,7 +3,7 @@ import streamlit as st
 from core.auth import gate
 from core.config import openrouter_key
 from core.openrouter import chat, list_models, free_models, multi_consult, synthesize, CURATED_MODELS
-from core.pubmed import search
+from core.pubmed import feed, search
 from core.vekta import VektaClient
 
 st.set_page_config(page_title="Labo Scientifique — WT Performance Hub", page_icon="🔬", layout="wide")
@@ -55,7 +55,7 @@ SYSTEM = (
     "Contexte de l'équipe (données récentes) : " + str(team_ctx)
 )
 
-tab1, tab2, tab3 = st.tabs(["📚 Veille PubMed critique", "💡 Brainstorming", "🧭 Sujets proposés par l'IA"])
+tab1, tab2, tab3 = st.tabs(["📚 Veille PubMed critique", "💡 Brainstorming", "🧭 Fil de veille (auto)"])
 
 with tab1:
     models = st.multiselect(
@@ -100,13 +100,95 @@ with tab2:
             with st.expander(f"🤖 {r['model']}", expanded=r["ok"]):
                 st.markdown(r["content"] if r["ok"] else f"❌ {r['content']}")
 
+DEFAULT_WATCH = [
+    "cycling performance physiology",
+    "endurance training elite cyclists",
+    "heat acclimation endurance performance",
+    "altitude training endurance athletes",
+    "carbohydrate fueling endurance performance",
+]
+
+
+@st.cache_data(ttl=7 * 86400, show_spinner=False)
+def _feed_cached(queries: tuple, days: int, retmax: int, _bump: int = 0):
+    return feed(list(queries), days=days, retmax=retmax)
+
+
 with tab3:
-    st.caption("L'IA propose des sujets de veille prioritaires à partir des données récentes de l'équipe.")
-    if st.button("💡 Générer 5 sujets de veille prioritaires", type="primary"):
+    st.subheader("📰 Fil de veille scientifique automatique")
+    st.caption("Articles PubMed les plus récents de ton domaine, triés par date. "
+               "Le fil se met à jour tout seul chaque semaine. L'IA synthétise "
+               "et propose de nouveaux sujets.")
+    if "watch_queries" not in st.session_state:
+        st.session_state["watch_queries"] = list(DEFAULT_WATCH)
+    queries = st.session_state["watch_queries"]
+    with st.expander("⚙️ Sujets surveillés (requêtes PubMed)"):
+        new_q = st.text_input("Ajouter un sujet (requête anglaise)", key="watch_add")
+        if st.button("➕ Ajouter au fil") and new_q.strip():
+            st.session_state["watch_queries"].append(new_q.strip())
+            st.rerun()
+        for i, sq in enumerate(list(queries)):
+            c1, c2 = st.columns([10, 1])
+            c1.text(f"• {sq}")
+            if c2.button("✖", key=f"watch_del_{i}"):
+                st.session_state["watch_queries"].pop(i)
+                st.rerun()
+    wb1, wb2 = st.columns(2)
+    days = wb1.slider("Fenêtre de recherche (jours)", 14, 180, 60)
+    if wb2.button("🔄 Actualiser maintenant"):
+        _feed_cached.clear()
+        st.rerun()
+    arts = _feed_cached(tuple(queries), days, 6) if queries else []
+    if not arts:
+        st.info("Aucun article récent pour ces sujets — élargis la fenêtre ou "
+                "ajoute des sujets.")
+    else:
+        st.caption(f"{len(arts)} articles des {days} derniers jours — du plus récent "
+                   "au plus ancien.")
+        for a in arts:
+            if a["pmid"] is None:
+                st.error(a["title"])
+                continue
+            with st.expander(f"📄 {a['date']} — {a['title'][:90]}"):
+                st.markdown(
+                    f"**[{a['title']}](https://pubmed.ncbi.nlm.nih.gov/{a['pmid']}/)**")
+                st.caption(f"{a['journal']} · {a['date']} · sujet : {a['query']}")
+                st.text(a["abstract"][:1600])
+        st.subheader("🧠 Synthèse IA du fil")
+        if st.button("🔬 Analyser le fil avec les IA", type="primary"):
+            abstracts = "\n\n".join(
+                f"[{a['query']}] {a['title']} ({a['journal']}, {a['date']})\n{a['abstract']}"
+                for a in arts if a["pmid"])
+            prompt = (
+                "Voici les articles PubMed récents du fil de veille de l'équipe :\n\n"
+                + abstracts[:12000] +
+                "\n\nFais la synthèse de veille :\n1. LES 3–5 POINTS À RETENIR "
+                "cette semaine (un par article clé)\n2. POUR CHAQUE POINT : ce que ça "
+                "change concrètement pour un staff World Tour (protocole, cible, piège)\n"
+                "3. SIGNAUX FAIBLES : sujets à surveiller prochainement"
+            )
+            results = multi_consult(models or [fallback_model], SYSTEM, prompt, key)
+            for r in results:
+                with st.expander(f"🤖 {r['model']}", expanded=r["ok"]):
+                    st.markdown(r["content"] if r["ok"] else f"❌ {r['content']}")
+            if any(r["ok"] for r in results) and models:
+                with st.spinner("Synthèse croisée…"):
+                    ok, content = synthesize(results, SYSTEM, prompt, key, models[0])
+                st.markdown(content if ok else f"❌ {content}")
+    st.subheader("💡 L'IA propose de nouveaux sujets")
+    domain = st.text_area(
+        "Ton domaine / tes priorités :",
+        "Cyclisme sur route élite : contre-la-montre, course par étape, "
+        "gestion de la fatigue, acclimatation chaleur/altitude, nutrition et "
+        "récupération des coureurs World Tour.", key="watch_domain")
+    if st.button("💡 Proposer 5 nouveaux sujets de veille", type="primary"):
         prompt = (
-            "À partir du contexte équipe fourni, propose 5 sujets de veille scientifique "
-            "PRIORITAIRES (une ligne chacun : sujet + pourquoi maintenant + requête PubMed "
-            "anglaise prête à copier). Base-toi sur les signaux faibles des données."
+            f"Domaine de l'équipe : {domain}\n\nPropose 5 sujets de veille "
+            "scientifique PRIORITAIRES (une ligne chacun : sujet + pourquoi maintenant "
+            "+ requête PubMed anglaise prête à copier). Sois force de proposition : "
+            "ancre-toi dans l'actualité de la recherche en physiologie du sport, "
+            "sans inventer de données."
         )
-        ok, content = chat(fallback_model, [{"role": "user", "content": prompt}], key, max_tokens=1200)
+        ok, content = chat(fallback_model, [{"role": "user", "content": prompt}],
+                           key, max_tokens=1200)
         st.markdown(content if ok else f"❌ {content}")
