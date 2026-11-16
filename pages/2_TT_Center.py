@@ -8,7 +8,8 @@ import streamlit as st
 from core.auth import gate
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
-from core.powermodel import fit_cp_model, target_power, estimate_scx, rho_air, quick_target
+from core.powermodel import (fit_cp_model, target_power, estimate_scx, rho_air,
+                             quick_target, solve_speed)
 from core.config import get_secret
 
 st.set_page_config(page_title="TT Center — WT Performance Hub", page_icon="⏱️", layout="wide")
@@ -141,25 +142,71 @@ with t2:
     st.caption("Astuce : moyennez sur ≥ 5 min à puissance stable, sans vent, pente < 1 %.")
 
 with t3:
-    st.subheader("Cible rapide — durée spéciale")
-    st.caption("Donne la puissance cible issue du PPR (modèle CP) et l'allure associée.")
+    st.subheader("Cible rapide — durée ou distance")
+    st.caption("Puissance cible issue du PPR (modèle CP). Choisis une durée OU une distance "
+               "de course : la puissance et le temps s'équilibrent automatiquement.")
     if model:
-        qt1, qt2 = st.columns(2)
-        q_dur = qt1.number_input("Durée cible (min)", 1.0, 90.0, 20.0, step=0.5)
+        q_mode = st.radio("Mode", ["Durée cible", "Distance cible"], horizontal=True,
+                          key="qt_mode")
+        qt1, qt2, qt3 = st.columns(3)
         q_grad = qt2.number_input("Pente du parcours (%)", -5.0, 15.0, 0.0, step=0.1)
+        q_wind = qt3.number_input("Vent de face (m/s, négatif = dos)", -10.0, 15.0, 0.0,
+                                  step=0.5)
         scx_default = st.session_state.get(f"scx_{rider_id}", 0.22)
         q_scx = st.number_input("SCx (m²)", 0.15, 0.50, float(scx_default), step=0.005)
         rho_q = rho_air(s_temp, s_press)
-        res = quick_target(model, q_dur * 60, float(athlete.get("weight") or 70.0),
-                           q_scx, rho_q,
-                           gradient_pct=q_grad)
+        q_mass = float(athlete.get("weight") or 70.0) + 8.0
+
+        t_eff = None
+        q_dur = None
+        q_dist = None
+        if q_mode == "Durée cible":
+            q_dur = qt1.number_input("Durée cible (min)", 1.0, 90.0, 20.0, step=0.5)
+            t_eff = q_dur * 60.0
+        else:
+            q_dist = qt1.number_input("Distance cible (km)", 1.0, 100.0, 20.0, step=0.1)
+            t_eff = 1200.0
+            for _ in range(40):
+                w_it = target_power(model, t_eff)
+                v_it = solve_speed(w_it, q_grad, q_mass, q_scx, rho_q,
+                                   headwind_ms=q_wind)
+                t_new = q_dist * 1000.0 / max(v_it, 0.5)
+                if abs(t_new - t_eff) < 0.2:
+                    t_eff = t_new
+                    break
+                t_eff = 0.5 * (t_eff + t_new)
+
+        res = quick_target(model, t_eff, q_mass, q_scx, rho_q,
+                           gradient_pct=q_grad, headwind_ms=q_wind)
         a, b, c, d = st.columns(4)
         a.metric("Puissance cible", f"{res['watts']} W", f"{res['wkg']} W/kg")
         b.metric("Vitesse estimée", f"{res['speed_kmh']} km/h")
+        if q_mode == "Distance cible":
+            th, tr = divmod(int(round(t_eff)), 3600)
+            tm, ts = divmod(tr, 60)
+            b.metric("Temps estimé", f"{th}:{tm:02d}:{ts:02d}")
         c.metric("CP de référence", f"{model['cp']:.0f} W")
         d.metric("W′ disponible", f"{model['wprime']/1000:.1f} kJ")
-        st.info(f"Pour **{q_dur:.0f} min** sur pente {q_grad:+.1f} % : viser **{res['watts']} W** "
-                f"(≈ {res['wkg']} W/kg). En course, partir à 97 % de cette cible les 2 premières "
-                f"minutes puis converger vers 100 %.")
+
+        if q_mode == "Durée cible":
+            st.info(f"Pour **{q_dur:.0f} min** sur pente {q_grad:+.1f} % : viser "
+                    f"**{res['watts']} W** (≈ {res['wkg']} W/kg). En course, partir à 97 % "
+                    f"de cette cible les 2 premières minutes puis converger vers 100 %.")
+        else:
+            st.info(f"Pour **{q_dist:.1f} km** sur pente {q_grad:+.1f} % : viser "
+                    f"**{res['watts']} W** (≈ {res['wkg']} W/kg), soit un temps estimé de "
+                    f"**{th}:{tm:02d}:{ts:02d}** à {res['speed_kmh']} km/h.")
+
+        durs_min = [1, 3, 5, 10, 20, 60]
+        ref = st.columns(len(durs_min))
+        for col, dm in zip(ref, durs_min):
+            col.metric(f"{dm} min", f"{target_power(model, dm * 60):.0f} W")
+        d_lo = min(p[0] for p in model["points"]) / 60.0
+        d_hi = max(p[0] for p in model["points"]) / 60.0
+        t_min = (t_eff / 60.0)
+        if t_min < d_lo * 0.5 or t_min > d_hi * 2.0:
+            st.warning(f"Extrapolation peu fiable : le modèle est ajusté sur des efforts de "
+                       f"{d_lo:.1f} à {d_hi:.1f} min, tu demandes {t_min:.1f} min. "
+                       f"Ajoute un effort proche de cette durée pour affiner le PPR.")
     else:
         st.warning("Ajustez d'abord le modèle CP (onglet Suivi).")

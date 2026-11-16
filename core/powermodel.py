@@ -61,7 +61,9 @@ def solve_speed(power_w: float, gradient_pct: float, mass_kg: float, scx: float,
                 - (0.5 * rho * scx * v_air ** 2 * v + mass_kg * G * (grad + crr) * v))
 
     lo, hi = 0.2, 32.0
-    if f(hi) < 0:
+    if f(lo) <= 0:
+        return lo
+    if f(hi) >= 0:
         return hi
     for _ in range(60):
         mid = 0.5 * (lo + hi)
