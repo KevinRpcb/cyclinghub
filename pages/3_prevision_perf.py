@@ -53,7 +53,7 @@ model = fit_cp_model(pts) or {"cp": float(pp["cp"]), "wprime": 20000.0}
 
 with st.expander("⚙️ Paramètres de simulation", expanded=True):
     p1, p2, p3, p4 = st.columns(4)
-    mass = p1.number_input("Masse totale (kg)", 40.0, 120.0, float(athlete["weight"]) + 8.0, 0.5)
+    mass = p1.number_input("Masse totale (kg)", 40.0, 120.0, float(athlete.get("weight") or 70.0) + 8.0, 0.5)
     scx = p2.number_input("SCx (m²)", 0.15, 0.50, float(st.session_state.get(f"scx_{rider_id}", 0.22)), 0.005)
     cp = p3.number_input("CP (W)", 150, 700, int(model["cp"]))
     wprime = p4.number_input("W′ (kJ)", 5.0, 40.0, model["wprime"] / 1000.0, 0.5)

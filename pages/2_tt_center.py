@@ -105,7 +105,7 @@ with t2:
     s_speed = sc2.number_input("Vitesse (km/h)", 10.0, 70.0, 47.0, step=0.1)
     s_grad = sc3.number_input("Pente (%)", -5.0, 15.0, 0.0, step=0.1)
     s_mass = sc4.number_input("Masse totale (kg)", 40.0, 120.0,
-                              float(athlete["weight"]) + 8.0, step=0.5)
+                              float(athlete.get("weight") or 70.0) + 8.0, step=0.5)
     sc5, sc6, sc7 = st.columns(3)
     s_temp = sc5.number_input("Température (°C)", -10.0, 45.0, 20.0, step=1.0)
     s_press = sc6.number_input("Pression (hPa)", 900.0, 1080.0, 1013.0, step=1.0)
@@ -129,7 +129,7 @@ with t3:
         scx_default = st.session_state.get(f"scx_{rider_id}", 0.22)
         q_scx = st.number_input("SCx (m²)", 0.15, 0.50, float(scx_default), step=0.005)
         rho_q = rho_air(s_temp, s_press)
-        res = quick_target(model, q_dur * 60, athlete["weight"], q_scx, rho_q,
+        res = quick_target(model, q_dur * 60, float(athlete.get("weight") or 70.0), q_scx, rho_q,
                            gradient_pct=q_grad)
         a, b, c, d = st.columns(4)
         a.metric("Puissance cible", f"{res['watts']} W", f"{res['wkg']} W/kg")
