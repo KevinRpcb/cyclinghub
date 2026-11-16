@@ -9,22 +9,50 @@ G = 9.8067
 def fit_cp_model(points) -> dict:
     """Ajuste P(t) = CP + W'/t sur les meilleurs efforts [(secondes, watts)].
 
-    Valide au-delà de ~20 s. Retourne {"cp","wprime","points"} ou None.
+    Valide au-delà de ~20 s. Les efforts non maximaux (très en dessous de la
+    courbe, ex. échauffement sur le vélo CLM) sont écartés itérativement :
+    un seul point sous-maximal effondre la CP. Retourne
+    {"cp","wprime","points","excluded"} ou None.
     """
     pts = sorted({(round(float(t)), round(float(p))) for t, p in points
                   if t and p and 20 <= float(t) <= 3600})
     if len(pts) < 2:
         return None
+    kept = []
+    for t, p in pts:
+        if kept and abs(t - kept[-1][0]) <= max(5.0, 0.03 * t):
+            if p > kept[-1][1]:
+                kept[-1] = (t, p)
+        else:
+            kept.append((t, p))
+    pts = kept
+    excluded = []
+    cp = wprime = 0.0
+    for _ in range(6):
+        if len(pts) < 2:
+            break
+        t = np.array([p[0] for p in pts], dtype=float)
+        pw = np.array([p[1] for p in pts], dtype=float)
+        x = 1.0 / t
+        A = np.vstack([x, np.ones_like(x)]).T
+        coef, *_ = np.linalg.lstsq(A, pw, rcond=None)
+        wprime, cp = float(coef[0]), float(coef[1])
+        if wprime <= 0 or cp <= 50:
+            return None
+        pred = cp + wprime / t
+        below = [p for p, pr in zip(pts, pred) if p[1] < 0.90 * pr]
+        if not below or len(pts) - len(below) < 2:
+            break
+        excluded += below
+        below_set = set(below)
+        pts = [p for p in pts if p not in below_set]
+    if len(pts) < 2 or wprime <= 0 or cp <= 50:
+        return None
     t = np.array([p[0] for p in pts], dtype=float)
     pw = np.array([p[1] for p in pts], dtype=float)
-    x = 1.0 / t
-    A = np.vstack([x, np.ones_like(x)]).T
-    coef, *_ = np.linalg.lstsq(A, pw, rcond=None)
-    wprime, cp = float(coef[0]), float(coef[1])
-    if wprime <= 0 or cp <= 50:
-        return None
     resid = float(np.sqrt(np.mean((pw - (cp + wprime / t)) ** 2)))
-    return {"cp": cp, "wprime": wprime, "points": pts, "rmse": resid}
+    return {"cp": cp, "wprime": wprime, "points": pts, "rmse": resid,
+            "excluded": excluded}
 
 
 def target_power(model: dict, seconds: float) -> float:
