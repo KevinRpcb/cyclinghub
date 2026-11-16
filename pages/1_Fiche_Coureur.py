@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.auth import gate
 from core.vekta import VektaClient
@@ -245,6 +246,82 @@ with right:
             ok, content = chat(model, [{"role": "user", "content": prompt}],
                                openrouter_key(), max_tokens=2500)
         if ok:
+            st.session_state["fiche_analysis"] = content
             st.markdown(content)
         else:
             st.error(f"OpenRouter : {content}")
+    elif st.session_state.get("fiche_analysis"):
+        with st.expander("\U0001f9e0 Analyse IA g\u00e9n\u00e9r\u00e9e pr\u00e9c\u00e9demment"):
+            st.markdown(st.session_state["fiche_analysis"])
+
+    if st.button("\U0001f5a8\ufe0f Fiche imprimable (PDF)"):
+        st.session_state["fiche_print"] = True
+
+# ── Fiche imprimable ─────────────────────────────────────────────
+if st.session_state.get("fiche_print"):
+    def _fmt(v, suffix=""):
+        return f"{v}{suffix}" if v not in (None, "", "?") else "\u2014"
+
+    def _row(cells):
+        return "".join(f'<td><span class="lbl">{k}</span><b>{v}</b></td>'
+                       for k, v in cells)
+
+    an = st.session_state.get("fiche_analysis") or ""
+    an_html = ("".join(f'<p>{ln}</p>' for ln in an.splitlines() if ln.strip())
+               if an else '<p class="mut">Analyse IA non g\u00e9n\u00e9r\u00e9e.</p>')
+    ppr_cells = ""
+    for key, lbl in [("p10s", "10 s"), ("p1m", "1 min"), ("p5m", "5 min"),
+                     ("p20m", "20 min"), ("cp", "CP")]:
+        if pp.get(key):
+            wkg = pp[key] / max(float(athlete.get("weight") or 1), 1)
+            ppr_cells += (f'<td><span class="lbl">{lbl}</span>'
+                          f'<b>{pp[key]:.0f} W</b> <span class="mut">{wkg:.1f}/kg</span></td>')
+    doc = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+@page {{ size: A4 portrait; margin: 10mm; }}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: Arial, Helvetica, sans-serif; color: #111318; background: #fff; }}
+.hero {{ background: #111318; color: #fff; padding: 16px 20px; display: flex;
+        justify-content: space-between; align-items: center; border-radius: 8px 8px 0 0; }}
+.hero h1 {{ font-size: 20px; letter-spacing: 2px; text-transform: uppercase; }}
+.hero .sub {{ font-size: 11px; color: rgba(255,255,255,.6); text-transform: uppercase;
+             letter-spacing: 1px; }}
+table.grid {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+table.grid td {{ background: #f4f5f7; border: 1px solid #dde0e8; padding: 7px 9px;
+                text-align: center; }}
+table.grid .lbl {{ display: block; font-size: 8px; letter-spacing: 1px;
+                  text-transform: uppercase; color: #7a8194; margin-bottom: 2px; }}
+table.grid b {{ font-size: 14px; }}
+.mut {{ color: #7a8194; font-size: 10px; }}
+.sec {{ font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #334155;
+       font-weight: 700; margin: 14px 0 2px; }}
+.comment {{ font-size: 11px; color: #334155; background: #f8fafc;
+           border-left: 3px solid #3b82f6; padding: 6px 10px; }}
+.analysis {{ font-size: 12px; line-height: 1.55; margin-top: 6px; }}
+.analysis p {{ margin: 5px 0; }}
+.printbtn {{ position: fixed; top: 12px; right: 12px; background: #111318; color: #fff;
+            border: none; padding: 10px 18px; border-radius: 6px; font-weight: 700;
+            cursor: pointer; }}
+@media print {{ .printbtn {{ display: none; }} }}
+</style></head><body>
+<button class="printbtn" onclick="window.print()">\U0001f5a8\ufe0f Imprimer / PDF</button>
+<div class="hero">
+  <div><h1>{athlete.get('name', rider_id)}</h1>
+  <div class="sub">{athlete.get('role', 'n/c')} \u00b7 WT Performance Hub</div></div>
+  <div class="sub">Fiche coureur \u2014 {pd.Timestamp.today().strftime('%d/%m/%Y')}</div>
+</div>
+<div class="sec">État du jour</div>
+<table class="grid"><tr>{_row([("VFC", _fmt(m.get('vfc_last'), ' ms')),
+    ("Baseline", _fmt(m.get('vfc_baseline'), ' ms')),
+    ("D\u00e9couplage", _fmt(m.get('decouplage_cardio'), ' %')),
+    ("Sommeil", _fmt(m.get('sleep_score')))])}</tr><tr>{_row([
+    ("Charge 7j", _fmt(m.get('load_7d'))),
+    ("CTL", f"{float(m.get('ctl', 0)):.0f}"),
+    ("ATL", f"{float(m.get('atl', 0)):.0f}"),
+    ("Forme (TSB)", f"{tsb:+.0f}"),
+    ("Readiness", f"{score}/100")])}</tr></table>
+<div class="sec">Profil de puissance (all-time)</div>
+<table class="grid"><tr>{ppr_cells or '<td class="mut">Aucune donn\u00e9e puissance</td>'}</tr></table>
+<div class="sec">Analyse staff</div>
+<div class="analysis">{an_html}</div>
+</body></html>"""
+    components.html(doc, height=1200, scrolling=True)
