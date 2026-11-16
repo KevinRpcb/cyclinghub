@@ -12,6 +12,7 @@ from core.tp import TPClient, session_client
 from core.riders import parse_riders_csv, cached_csv, store_csv
 from core.powermodel import fit_cp_model, rho_air, wprime_balance
 from core.course import parse_course, build_segments, fetch_weather, simulate
+from core.fitexport import workout_from_parts
 
 st.set_page_config(page_title="Prévision de perf — WT Performance Hub", page_icon="🎯", layout="wide")
 gate()
@@ -150,13 +151,19 @@ with st.expander("⚙️ Paramètres de simulation", expanded=True):
 weather = None
 rho = rho_air(20.0, 1013.0)
 wind_ms = wind_dir = 0.0
+wet_road = False
 if use_weather and center:
     weather = fetch_weather(center[0], center[1], race_date.strftime("%Y-%m-%d"), race_hour)
     if "error" in weather:
         st.warning(weather["error"])
     else:
         rho = rho_air(weather["temp_c"], weather["pressure_hpa"])
-        wind_ms, wind_dir = weather["wind_ms"], weather["wind_dir"]
+        gusts = weather.get("gusts_ms", 0.0)
+        wind_eff = max(weather["wind_ms"], 0.6 * gusts)
+        wind_ms, wind_dir = wind_eff, weather["wind_dir"]
+        wet_road = weather.get("precip_mm", 0.0) > 0.2
+        gtxt = f" · rafales {gusts:.0f} m/s" if gusts > weather["wind_ms"] + 1 else ""
+        ptxt = f" · pluie {weather['precip_mm']:.1f} mm" if wet_road else ""
         st.success(f"🌤️ Météo {weather['time']} : {weather['temp_c']:.0f} °C · vent "
                    f"{weather['wind_ms']:.1f} m/s ({weather['wind_dir']:.0f}°) · ρ = {rho:.3f} kg/m³")
 
@@ -169,8 +176,11 @@ else:
     p_target = st.number_input("Puissance moyenne visée (W)", 100, 700, int(cp * 0.95))
 
 with st.spinner("Simulation du pacing…"):
+    if wet_road:
+        st.info("🌧️ Piste mouillée : Crr majoré de +0.0008 dans la simulation.")
     result = simulate(segs, mass, scx, rho, cp, wprime * 1000.0,
-                      p_target=p_target, goal_time_s=goal_time_s, crr=crr,
+                      p_target=p_target, goal_time_s=goal_time_s,
+                      crr=crr + (0.0008 if wet_road else 0.0),
                       eta=eta / 100.0, wind_ms=wind_ms, wind_dir=wind_dir)
 
 out = result["df"]
@@ -344,7 +354,7 @@ def _pacing_svg(parts, segs, total_km, power_curve=None):
 
 
 def _print_doc(parts, segs, total_km, dplus, race, stage, date_str, logo_uri,
-               total_time_str, avg_w, wind_lbl, power_curve=None):
+               total_time_str, avg_w, wind_lbl, power_curve=None, rider_name=""):
     rows = "".join(
         f"<tr><td><b>P{p['n']}</b></td><td>{p['km_start']:.0f}–{p['km_end']:.0f} km</td>"
         f"<td>{p['dist_km']:.1f} km</td><td><b>{p['watts']} W</b></td>"
@@ -384,7 +394,7 @@ td {{ padding: 6px 8px; border-bottom: 1px solid #dde0e8; }}
 @media print {{ .printbtn {{ display: none; }} }}
 </style></head><body>
 <button class="printbtn" onclick="window.print()">🖨️ Print / PDF</button>
-<div class="hero">{logo}<div><div class="sub">Race plan — pacing</div>
+<div class="hero">{logo}<div><div class="sub">Race plan — pacing · {rider_name}</div>
 <h1>Race strategy — {race or '—'}</h1></div>
 <div class="durbox"><span>Estimated time</span><br><b>{total_time_str}</b><br>
 <span>{avg_w:.0f} W avg</span></div></div>
@@ -420,9 +430,14 @@ total_time_str = f"{int(h):02d}:{int(mn):02d}:{int(s):02d}"
 wind_lbl = (f"{abs(wind_ms) * 3.6:.0f} km/h" if wind_ms else "non pris en compte")
 power_curve = list(zip((out["start_km"] + out["dist_m"] / 1000.0).values,
                        out["power_w"].values))
+fit_bytes = workout_from_parts(parts, f"Race plan {athlete['name']}")
+st.download_button("⬇️ Exporter le plan pour le compteur (.fit)", fit_bytes,
+                   f"race_plan_{athlete['name'].replace(' ', '_')}.fit",
+                   "application/octet-stream")
 doc = _print_doc(parts, segs, total_km, dplus, race_name, stage_name,
                  race_day.strftime("%d/%m/%Y"), _img_uri(logo_up),
-                 total_time_str, result["avg_w"], wind_lbl, power_curve)
+                 total_time_str, result["avg_w"], wind_lbl, power_curve,
+                 rider_name=athlete["name"])
 components.html(doc, height=1050, scrolling=True)
 
 st.caption("Modèle : P = ½·ρ·SCx·v²·v + m·g·(pente + Crr)·v, rendement chaîne inclus. "
