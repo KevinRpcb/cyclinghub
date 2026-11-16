@@ -1,6 +1,5 @@
 import base64
 import html as _html
-import io
 import math
 from datetime import datetime
 
@@ -13,6 +12,7 @@ from core.auth import gate
 from core.config import wu_protocols
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
+from core.riders import parse_riders_csv, cached_csv, store_csv
 
 st.set_page_config(page_title="Échauffement WU24 — WT Performance Hub", page_icon="🔥", layout="wide")
 gate()
@@ -280,31 +280,17 @@ if src == "Vekta (API)":
 elif src == "Fichier CSV":
     up = st.sidebar.file_uploader("database_CP.csv", type=["csv"])
     if up:
-        try:
-            raw = up.getvalue().decode("utf-8-sig")
-            sep = ";" if ";" in raw.splitlines()[0] else ","
-            df = pd.read_csv(io.StringIO(raw), sep=sep)
-            df.columns = [str(c).strip().lower() for c in df.columns]
-            required = ["name", "hrmax", "weight", "cp"]
-            missing = [c for c in required if c not in df.columns]
-            if missing:
-                st.error(f"Colonnes manquantes : {', '.join(missing)} — "
-                         f"colonnes trouvées dans ton fichier : {', '.join(df.columns)}")
-            else:
-                for c in ("hrmax", "weight", "cp"):
-                    df[c] = pd.to_numeric(df[c], errors="coerce")
-                before = len(df)
-                df = df.dropna(subset=required)
-                if df.empty:
-                    st.error("Aucune ligne exploitable — vérifie que 'hrmax', 'weight' et 'cp' "
-                             "contiennent bien des nombres (pas de texte comme '400 W').")
-                else:
-                    riders = df.to_dict("records")
-                    st.sidebar.success(f"{len(riders)} coureur(s) chargé(s) depuis le CSV"
-                                       + (f" ({before - len(riders)} ligne(s) écartée(s))."
-                                          if before != len(riders) else "."))
-        except Exception as e:
-            st.error(f"CSV illisible : {e}")
+        riders, note = parse_riders_csv(up.getvalue())
+        if note and not note.startswith("("):
+            st.sidebar.error(note)
+        elif riders:
+            store_csv(up.name, riders)
+            st.sidebar.success(f"{len(riders)} coureur(s) chargé(s) depuis le CSV{note}")
+    elif cached_csv():
+        cache = cached_csv()
+        riders = cache["riders"]
+        st.sidebar.info(f"CSV conservé de ta dernière visite : **{cache['name']}** "
+                        f"({len(riders)} coureur(s)) — glisse un fichier pour le remplacer.")
     else:
         st.info("Glisse ton fichier `database_CP.csv` dans la barre latérale.")
 

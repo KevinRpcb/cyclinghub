@@ -4,39 +4,89 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.auth import gate
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
+from core.riders import parse_riders_csv, cached_csv, store_csv
 from core.powermodel import fit_cp_model, rho_air, wprime_balance
 from core.course import parse_course, build_segments, fetch_weather, simulate
 
 st.set_page_config(page_title="Prévision de perf — WT Performance Hub", page_icon="🎯", layout="wide")
 gate()
 
-src = st.sidebar.radio("Source des données", ["Vekta (API)", "TrainingPeaks"], key="prev_src")
-client = VektaClient()
-if src == "TrainingPeaks":
-    tp = session_client()
-    if not tp.configured:
-        st.warning("TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD dans les Secrets "
-                   "Streamlit — Vekta est utilisée en attendant.")
+src = st.sidebar.radio("Source des données", ["Vekta (API)", "TrainingPeaks", "Manuel / CSV"],
+                       key="prev_src")
+athlete, pp, fixed_model = None, None, None
+if src == "Manuel / CSV":
+    mode_mc = st.sidebar.radio("Mode", ["Saisie manuelle", "Fichier CSV"], key="prev_mc_mode")
+    if mode_mc == "Saisie manuelle":
+        st.sidebar.caption("Coureur sans API : tu tapes ses valeurs à la main.")
+        _name = st.sidebar.text_input("Nom", "Coureur manuel", key="prev_man_name")
+        _cp = st.sidebar.number_input("CP (W)", 150, 700, 300, key="prev_man_cp")
+        _wp = st.sidebar.number_input("W′ (kJ)", 2.0, 40.0, 20.0, 0.5, key="prev_man_wp")
+        _kg = st.sidebar.number_input("Poids (kg)", 40.0, 110.0, 70.0, 0.5, key="prev_man_kg")
+        athlete = {"id": "manuel", "name": _name, "role": "Manuel", "weight": float(_kg)}
+        pp = {"cp": int(_cp)}
+        fixed_model = {"cp": float(_cp), "wprime": float(_wp) * 1000.0}
     else:
-        riders_tp = tp.get_athletes()
-        if riders_tp:
-            client = tp
+        up_csv = st.sidebar.file_uploader("database_CP.csv", type=["csv"], key="prev_csv")
+        csv_riders, csv_note = [], ""
+        if up_csv is not None:
+            csv_riders, csv_note = parse_riders_csv(up_csv.getvalue())
+            if csv_note and not csv_note.startswith("("):
+                st.sidebar.error(csv_note)
+                csv_riders = []
+            elif csv_riders:
+                store_csv(up_csv.name, csv_riders)
+                st.sidebar.success(f"{len(csv_riders)} coureur(s) chargé(s){csv_note}")
+        elif cached_csv():
+            cache = cached_csv()
+            csv_riders = cache["riders"]
+            st.sidebar.info(f"CSV conservé : **{cache['name']}** ({len(csv_riders)} coureur(s)) "
+                            "— le même que dans Échauffement.")
+        if not csv_riders:
+            st.sidebar.info("Glisse ton `database_CP.csv` (le même que dans Échauffement) "
+                            "ou passe en Saisie manuelle.")
+            st.stop()
+        _names = [str(r.get("name")) for r in csv_riders]
+        _shared = st.session_state.get("rider_id")
+        _ri = next((i for i, nm in enumerate(_names) if nm == _shared), 0)
+        _sel = st.sidebar.selectbox("Coureur (CSV)", _names, index=_ri, key="prev_csv_rider")
+        st.session_state["rider_id"] = _sel
+        _row = next(r for r in csv_riders if str(r.get("name")) == _sel)
+        athlete = {"id": _sel, "name": _sel, "role": "CSV", "weight": _row.get("weight") or 70.0}
+        pp = {k: int(_row[k]) for k in ("p10s", "p20s", "p30s", "p1m", "p3m", "p5m",
+                                        "p10m", "p20m") if _row.get(k)}
+        pp["cp"] = int(_row["cp"])
+        if not any(k in pp for k in ("p1m", "p5m", "p10m", "p20m")):
+            fixed_model = {"cp": float(_row["cp"]),
+                           "wprime": float(_row["wprime"]) * 1000.0 if _row.get("wprime")
+                           else 20000.0}
+else:
+    client = VektaClient()
+    if src == "TrainingPeaks":
+        tp = session_client()
+        if not tp.configured:
+            st.warning("TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD dans les Secrets "
+                       "Streamlit — Vekta est utilisée en attendant.")
         else:
-            st.warning(f"TrainingPeaks : {tp.last_error} — repli sur Vekta.")
-riders = client.get_athletes()
-labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
-_keys = list(labels.keys())
-_shared = st.session_state.get("rider_id")
-_idx = _keys.index(_shared) if _shared in _keys else 0
-rider_id = st.sidebar.selectbox("Coureur", _keys, index=_idx, format_func=lambda x: labels[x],
-                                key="prev_rider")
-st.session_state["rider_id"] = rider_id
-athlete = client.get_athlete(rider_id)
-pp = client.get_power_profile(rider_id)
+            riders_tp = tp.get_athletes()
+            if riders_tp:
+                client = tp
+            else:
+                st.warning(f"TrainingPeaks : {tp.last_error} — repli sur Vekta.")
+    riders = client.get_athletes()
+    labels = {a["id"]: f"{a.get('name','?')} — {a.get('role','')}" for a in riders}
+    _keys = list(labels.keys())
+    _shared = st.session_state.get("rider_id")
+    _idx = _keys.index(_shared) if _shared in _keys else 0
+    rider_id = st.sidebar.selectbox("Coureur", _keys, index=_idx, format_func=lambda x: labels[x],
+                                    key="prev_rider")
+    st.session_state["rider_id"] = rider_id
+    athlete = client.get_athlete(rider_id)
+    pp = client.get_power_profile(rider_id)
 
 st.title("🎯 Prévision de performance — pacing & watts cibles")
 st.caption("Glissez un fichier .gpx ou .fit du parcours : modèle aéro/gravité/roulement calibré "
@@ -73,14 +123,17 @@ c2.metric("D+", f"{dplus:.0f} m")
 c3.metric("Segments", len(segs))
 
 # ── Paramètres coureur ───────────────────────────────────────────────────
-pts = [(s, pp[k]) for k, s in [("p1m", 60), ("p3m", 180), ("p5m", 300),
-                               ("p10m", 600), ("p20m", 1200)] if pp.get(k)]
-model = fit_cp_model(pts) or {"cp": float(pp["cp"]), "wprime": 20000.0}
+if fixed_model is not None:
+    model = dict(fixed_model)
+else:
+    pts = [(s, pp[k]) for k, s in [("p1m", 60), ("p3m", 180), ("p5m", 300),
+                                   ("p10m", 600), ("p20m", 1200)] if pp.get(k)]
+    model = fit_cp_model(pts) or {"cp": float(pp["cp"]), "wprime": 20000.0}
 
 with st.expander("⚙️ Paramètres de simulation", expanded=True):
     p1, p2, p3, p4 = st.columns(4)
     mass = p1.number_input("Masse totale (kg)", 40.0, 120.0, float(athlete.get("weight") or 70.0) + 8.0, 0.5)
-    scx = p2.number_input("SCx (m²)", 0.15, 0.50, float(st.session_state.get(f"scx_{rider_id}", 0.22)), 0.005)
+    scx = p2.number_input("SCx (m²)", 0.15, 0.50, float(st.session_state.get(f"scx_{athlete['id']}", 0.22)), 0.005)
     cp = p3.number_input("CP (W)", 150, 700, int(model["cp"]))
     wprime = p4.number_input("W′ (kJ)", 5.0, 40.0, model["wprime"] / 1000.0, 0.5)
     p5, p6, p7 = st.columns(3)
@@ -152,8 +205,10 @@ with st.expander("📋 Plan de pacing détaillé (par segment)"):
     st.dataframe(out[["start_km", "dist_m", "gradient_pct", "power_w", "speed_kmh", "time_s"]],
                  use_container_width=True, hide_index=True)
     csv = out.to_csv(index=False).encode("utf-8")
+    course_name = (up.name if up is not None
+                   else st.session_state.get("prev_course_cache", {}).get("name", "course"))
     st.download_button("⬇️ Exporter le plan (CSV pour l'unité de compteur)", csv,
-                       f"pacing_{rider_id}_{up.name}.csv", "text/csv")
+                       f"pacing_{athlete['id']}_{course_name}.csv", "text/csv")
 
 # ── Plan simple pour le coureur (schéma + document imprimable) ──────────
 def _img_uri(up):
