@@ -252,12 +252,13 @@ def _group_parts(out, n, wind_ms, wind_dir):
     return parts
 
 
-def _pacing_svg(parts, segs, total_km):
-    W, H = 900, 340
+def _pacing_svg(parts, segs, total_km, power_curve=None):
+    W, H = 900, 452
     PL, PR = 16, 16
     cw = W - PL - PR
-    wind_y = 24
-    py, ph = 84, 168
+    wind_y = 26
+    box_top, bh, bw = 46, 64, 124
+    py, ph = box_top + 2 * (bh + 10) + 6, 200
     def tx(km):
         return PL + cw * (km / max(total_km, 0.1))
     svg = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">']
@@ -287,9 +288,8 @@ def _pacing_svg(parts, segs, total_km):
             svg.append(f'<line x1="{x1:.1f}" y1="{py}" x2="{x1:.1f}" y2="{py + ph}" '
                        f'stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>')
         cx = (x1 + x2) / 2
-        bw, bh = 124, 64
         bx = min(max(cx - bw / 2, PL), PL + cw - bw)
-        by = py + 8 if i % 2 == 0 else py + ph - bh - 8
+        by = box_top if i % 2 == 0 else box_top + bh + 10
         svg.append(f'<rect x="{bx:.1f}" y="{by}" width="{bw}" height="{bh}" rx="6" '
                    f'fill="#ffffff" fill-opacity="0.92" stroke="{col}" stroke-width="2"/>')
         mm, ss = divmod(int(round(p["time_s"])), 60)
@@ -311,7 +311,7 @@ def _pacing_svg(parts, segs, total_km):
             wcol = "#dc2626" if headwind else "#16a34a"
             svg.append(f'<line x1="{x_a:.1f}" y1="{wind_y}" x2="{x_b:.1f}" y2="{wind_y}" '
                        f'stroke="{wcol}" stroke-width="3.5" marker-end="url(#ah)"/>')
-            lbl = "face" if headwind else "dos"
+            lbl = "head" if headwind else "tail"
             svg.append(f'<text x="{cx:.1f}" y="{wind_y - 7}" text-anchor="middle" font-size="10" '
                        f'font-family="Arial" font-weight="bold" fill="{wcol}">{abs(wk):.0f} {lbl}</text>')
 
@@ -326,25 +326,38 @@ def _pacing_svg(parts, segs, total_km):
                f'{e_hi:.0f} m</text>')
     svg.append(f'<text x="{PL}" y="{py + ph - 10}" font-size="9" font-family="Arial" '
                f'fill="#94a3b8">{e_lo:.0f} m</text>')
+
+    if power_curve:
+        pk = np.array([k for k, _ in power_curve])
+        pw = np.array([w for _, w in power_curve], dtype=float)
+        w_lo, w_hi = float(pw.min()), float(pw.max())
+        w_span = max(w_hi - w_lo, 20.0)
+        def wy(w):
+            return py + ph - 8 - (ph - 30) * ((w - w_lo) / w_span)
+        pts = " ".join(f"{tx(k):.1f},{wy(w):.1f}" for k, w in zip(pk, pw))
+        svg.append(f'<polyline points="{pts}" fill="none" stroke="#dc2626" '
+                   f'stroke-width="2" opacity="0.85"/>')
+        svg.append(f'<text x="{PL + cw}" y="{py + 10}" text-anchor="end" font-size="9" '
+                   f'font-family="Arial" font-weight="bold" fill="#dc2626">power (W)</text>')
     svg.append("</svg>")
     return "".join(svg)
 
 
 def _print_doc(parts, segs, total_km, dplus, race, stage, date_str, logo_uri,
-               total_time_str, avg_w, wind_lbl):
+               total_time_str, avg_w, wind_lbl, power_curve=None):
     rows = "".join(
         f"<tr><td><b>P{p['n']}</b></td><td>{p['km_start']:.0f}–{p['km_end']:.0f} km</td>"
         f"<td>{p['dist_km']:.1f} km</td><td><b>{p['watts']} W</b></td>"
         f"<td>{divmod(int(round(p['time_s'])), 60)[0]}:{divmod(int(round(p['time_s'])), 60)[1]:02d}</td>"
         f"<td>{p['grad']:+.1f} %</td><td>{abs(p['wind_kmh']):.0f} km/h "
-        f"{'face' if p['wind_kmh'] > 0 else ('dos' if p['wind_kmh'] < 0 else '—')}</td></tr>"
+        f"{'head' if p['wind_kmh'] > 0 else ('tail' if p['wind_kmh'] < 0 else '—')}</td></tr>"
         for p in parts)
     logo = f'<img src="{logo_uri}" style="height:46px;max-width:180px;object-fit:contain">' if logo_uri else \
            '<div style="font-weight:900;letter-spacing:3px;color:rgba(255,255,255,.5)">LOGO</div>'
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 @page {{ size: A4 portrait; margin: 10mm; }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: Arial, Helvetica, sans-serif; color: #111318; }}
+body {{ font-family: Arial, Helvetica, sans-serif; color: #111318; background: #ffffff; }}
 .hero {{ background: #111318; color: #fff; padding: 16px 20px; display: flex;
         align-items: center; gap: 16px; border-radius: 8px 8px 0 0; }}
 .hero h1 {{ font-size: 22px; letter-spacing: 2px; text-transform: uppercase; }}
@@ -370,23 +383,23 @@ td {{ padding: 6px 8px; border-bottom: 1px solid #dde0e8; }}
             cursor: pointer; }}
 @media print {{ .printbtn {{ display: none; }} }}
 </style></head><body>
-<button class="printbtn" onclick="window.print()">🖨️ Imprimer / PDF</button>
-<div class="hero">{logo}<div><div class="sub">Plan de course — pacing</div>
-<h1>Stratégie {race or '—'}</h1></div>
-<div class="durbox"><span>Temps estimé</span><br><b>{total_time_str}</b><br>
-<span>{avg_w:.0f} W moyen</span></div></div>
+<button class="printbtn" onclick="window.print()">🖨️ Print / PDF</button>
+<div class="hero">{logo}<div><div class="sub">Race plan — pacing</div>
+<h1>Race strategy — {race or '—'}</h1></div>
+<div class="durbox"><span>Estimated time</span><br><b>{total_time_str}</b><br>
+<span>{avg_w:.0f} W avg</span></div></div>
 <div class="racebar">
-<div><div class="lbl">Course</div><div class="val">{race or '—'}</div></div>
-<div><div class="lbl">Étape</div><div class="val">{stage or '—'}</div></div>
+<div><div class="lbl">Race</div><div class="val">{race or '—'}</div></div>
+<div><div class="lbl">Stage</div><div class="val">{stage or '—'}</div></div>
 <div><div class="lbl">Date</div><div class="val">{date_str or '—'}</div></div>
 <div><div class="lbl">Distance</div><div class="val">{total_km:.1f} km · {dplus:.0f} m D+</div></div>
-<div><div class="lbl">Vent</div><div class="val">{wind_lbl}</div></div>
+<div><div class="lbl">Wind</div><div class="val">{wind_lbl}</div></div>
 </div>
-<div class="chart">{_pacing_svg(parts, segs, total_km)}</div>
-<table><tr><th>Partie</th><th>Km</th><th>Longueur</th><th>Puissance</th><th>Durée</th>
-<th>Pente</th><th>Vent</th></tr>{rows}</table>
-<div class="note">Vent de face = flèche rouge vers la gauche. Vent de dos = flèche verte
-vers la droite. Couleurs : vert plat · orange montée · rouge forte pente · bleu descente.</div>
+<div class="chart">{_pacing_svg(parts, segs, total_km, power_curve)}</div>
+<table><tr><th>Part</th><th>Km</th><th>Length</th><th>Power</th><th>Time</th>
+<th>Gradient</th><th>Wind</th></tr>{rows}</table>
+<div class="note">Headwind = red arrow pointing left. Tailwind = green arrow pointing right.
+Colors: green flat · orange climb · red steep · blue descent. Red curve = target power (W).</div>
 </body></html>"""
 
 
@@ -405,9 +418,11 @@ logo_up = pf.file_uploader("Logo (png/jpg)", type=["png", "jpg", "jpeg"], key="p
 parts = _group_parts(out, n_parts, wind_ms, wind_dir)
 total_time_str = f"{int(h):02d}:{int(mn):02d}:{int(s):02d}"
 wind_lbl = (f"{abs(wind_ms) * 3.6:.0f} km/h" if wind_ms else "non pris en compte")
+power_curve = list(zip((out["start_km"] + out["dist_m"] / 1000.0).values,
+                       out["power_w"].values))
 doc = _print_doc(parts, segs, total_km, dplus, race_name, stage_name,
                  race_day.strftime("%d/%m/%Y"), _img_uri(logo_up),
-                 total_time_str, result["avg_w"], wind_lbl)
+                 total_time_str, result["avg_w"], wind_lbl, power_curve)
 components.html(doc, height=1050, scrolling=True)
 
 st.caption("Modèle : P = ½·ρ·SCx·v²·v + m·g·(pente + Crr)·v, rendement chaîne inclus. "
