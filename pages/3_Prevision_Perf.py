@@ -440,6 +440,39 @@ doc = _print_doc(parts, segs, total_km, dplus, race_name, stage_name,
                  rider_name=athlete["name"])
 components.html(doc, height=1050, scrolling=True)
 
+st.divider()
+with st.expander("📊 Prévision vs réel (calibrage du modèle)"):
+    hist = st.session_state.setdefault("prev_history", [])
+    if st.button("💾 Enregistrer cette prévision"):
+        hist.append({"course": race_name or "—", "date": race_day.strftime("%d/%m/%Y"),
+                     "km": round(total_km, 1), "temps_estime": total_time_str,
+                     "est_s": int(h * 3600 + mn * 60 + s), "w_moyen": int(result["avg_w"])})
+        st.rerun()
+    if hist:
+        dfh = pd.DataFrame(hist)
+        st.dataframe(dfh, hide_index=True, use_container_width=True)
+        i = st.selectbox("Course à comparer", range(len(hist)),
+                         format_func=lambda k: f"{hist[k]['course']} — {hist[k]['date']}")
+        rc1, rc2, rc3 = st.columns(3)
+        rh = rc1.number_input("h", 0, 8, 0, key="real_h")
+        rmn = rc2.number_input("min", 0, 59, 0, key="real_m")
+        rs = rc3.number_input("s", 0, 59, 0, key="real_s")
+        real_s = rh * 3600 + rmn * 60 + rs
+        if real_s > 0:
+            est = hist[i]["est_s"]
+            d = (real_s - est) / est * 100
+            st.metric("Écart prévision / réel", f"{d:+.1f} %",
+                      "modèle optimiste" if d > 0 else "modèle pessimiste")
+        st.download_button("⬇️ Historique (CSV)", dfh.to_csv(index=False).encode(),
+                           "historique_previsions.csv", "text/csv")
+        if st.button("🗑️ Vider l'historique"):
+            st.session_state["prev_history"] = []
+            st.rerun()
+    else:
+        st.caption("Enregistre une prévision avant la course, puis saisis le temps réel "
+                   "après : l'écart te dit si le modèle est optimiste ou pessimiste "
+                   "pour ce coureur.")
+
 st.caption("Modèle : P = ½·ρ·SCx·v²·v + m·g·(pente + Crr)·v, rendement chaîne inclus. "
            "Le pacing surpondère les sections en montée (sensibilité de la vitesse à la puissance) "
            "et sous-alimente les descentes — logique BestBikeSplit.")
