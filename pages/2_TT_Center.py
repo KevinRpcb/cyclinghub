@@ -118,7 +118,7 @@ with t1:
         st.markdown("**Convertisseur PPR** — puissance ↔ durée")
         cv1, cv2 = st.columns(2)
         with cv1:
-            st.caption("Je connais la puissance → durée tenable")
+            st.caption("Puissance → durée tenable")
             cp_w = st.number_input("Puissance (W)", 50, 1500, int(model["cp"] * 1.1),
                                    key="ppr_w")
             if cp_w <= model["cp"]:
@@ -133,7 +133,7 @@ with t1:
                 if t_hold > 3600:
                     st.warning("Au-delà d'1 h, le modèle extrapole : valeur indicative.")
         with cv2:
-            st.caption("Je connais la durée → puissance du PPR")
+            st.caption("Durée → puissance PPR")
             ch1, ch2, ch3 = st.columns(3)
             d_h = ch1.number_input("h", 0, 12, 0, key="ppr_dh")
             d_m = ch2.number_input("min", 0, 59, 30, key="ppr_dm")
