@@ -11,6 +11,7 @@ from core.vekta import VektaClient
 from core.tp import TPClient, session_client
 from core.openrouter import chat, CURATED_MODELS, DEFAULT_MODEL
 from core.config import openrouter_key
+from core import planstore
 
 st.set_page_config(page_title="Plannif annuel — WT Performance Hub", page_icon="🗓️", layout="wide")
 gate()
@@ -343,9 +344,42 @@ with t_ia:
 
 with t_save:
     st.subheader("Sauvegarde du plan (tous les coureurs)")
-    st.caption("Le plan est gardé pendant ta session. Exporte-le en JSON pour le "
-               "conserver, réimporte-le à la prochaine connexion (Streamlit Cloud ne "
-               "permet pas d'écrire sur le serveur).")
+    if not st.session_state.get("plan_cloud_loaded"):
+        st.session_state["plan_cloud_loaded"] = True
+        cloud, msg = planstore.load_plan()
+        if isinstance(cloud, dict) and cloud:
+            for rid, p in cloud.items():
+                cur_p = plan_all.setdefault(rid, {"races": [], "blocks": []})
+                if not cur_p["races"] and not cur_p["blocks"]:
+                    plan_all[rid] = p
+        elif msg and "Aucune sauvegarde" not in msg and "GIST_TOKEN" not in msg:
+            st.warning(f"Cloud privé : {msg}")
+
+    st.markdown("**☁️ Cloud privé (recommandé)**")
+    st.caption("Le plan est enregistré **chiffré** dans un fichier privé : même si "
+               "quelqu'un trouve le fichier, il est illisible sans la clé, qui ne "
+               "quitte jamais tes Secrets Streamlit. Seul toi, via l'app (mot de passe), "
+               "peut le lire.")
+    sc1, sc2 = st.columns(2)
+    if sc1.button("☁️ Enregistrer dans le cloud privé", type="primary"):
+        ok, msg = planstore.save_plan(plan_all)
+        (st.success if ok else st.error)(msg)
+    if sc2.button("☁️ Recharger depuis le cloud"):
+        cloud, msg = planstore.load_plan()
+        if isinstance(cloud, dict):
+            for rid, p in cloud.items():
+                cur_p = plan_all.setdefault(rid, {"races": [], "blocks": []})
+                if not cur_p["races"] and not cur_p["blocks"]:
+                    plan_all[rid] = p
+            (st.success if cloud else st.info)(msg)
+            st.rerun()
+        else:
+            st.warning(msg)
+
+    st.divider()
+    st.markdown("**📄 Fichier JSON (secours)**")
+    st.caption("Le plan est gardé aussi pendant ta session : exporte-le en JSON si tu "
+               "veux une copie locale.")
     blob = json.dumps(plan_all, ensure_ascii=False, indent=1)
     st.download_button("⬇️ Exporter le plan (JSON)", blob, file_name="plannif_wt.json",
                        mime="application/json")
