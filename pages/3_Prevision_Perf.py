@@ -263,8 +263,11 @@ def _pacing_svg(parts, segs, total_km):
     svg.append(f'<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="5" refY="3.5" '
                f'orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#64748b"/></marker></defs>')
 
-    d_km = segs["d"].values / 1000.0
-    ele = segs["ele"].values.astype(float)
+    d_km = (segs["start_km"] + segs["dist_m"] / 1000.0).values
+    if "ele" in segs.columns:
+        ele = segs["ele"].values.astype(float)
+    else:
+        ele = (segs["gradient_pct"] / 100.0 * segs["dist_m"]).cumsum().values
     e_lo, e_hi = float(np.nanmin(ele)), float(np.nanmax(ele))
     span = max(e_hi - e_lo, 20.0)
     def ty(e):
