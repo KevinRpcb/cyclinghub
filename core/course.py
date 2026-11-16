@@ -136,6 +136,7 @@ def build_segments(points: list, bin_m: float = 25.0) -> pd.DataFrame:
             "dist_m": dd,
             "gradient_pct": float(np.clip(de / dd * 100.0, -18.0, 22.0)),
             "bearing_deg": float(df["bearing"].iloc[a:b].mean()),
+            "ele": float(df["ele"].iloc[b - 1]),
         })
     return pd.DataFrame(segs)
 
