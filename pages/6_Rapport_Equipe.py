@@ -256,7 +256,14 @@ def _fmt_km(v):
     return f"{v:,.0f}".replace(",", " ") if v else "—"
 
 
-if st.button("📄 Générer le rapport", type="primary"):
+_iso_week = date.today().isocalendar()[1]
+_want_auto = date.today().weekday() == 0 and \
+    st.session_state.get("rep_auto_week") != _iso_week
+if st.button("📄 Générer le rapport", type="primary") or _want_auto:
+    if _want_auto:
+        st.session_state["rep_auto_week"] = _iso_week
+        st.info("🗓️ Rapport hebdomadaire généré automatiquement — "
+                "prêt chaque lundi sans cliquer.")
     with st.spinner("Collecte des données coureurs…"):
         rows = [rider_row(riders[names.index(n)], days, offset) for n in sel]
     all_errs = [e for r in rows for e in r["errors"]]
