@@ -1,4 +1,5 @@
 import base64
+import html as _html
 from datetime import date
 
 import numpy as np
@@ -304,6 +305,8 @@ if st.button("📄 Générer le rapport", type="primary") or _want_auto:
                 ("Séances", vs.get("sessions", "—") if vs else "—",
                  _delta(vs.get("sessions"), vps.get("sessions")) if vs and vps else ""),
             ])
+        r["name"] = _html.escape(str(r["name"]))
+        r["role"] = _html.escape(str(r.get("role", "—")))
         hrv_txt = (f'{r["hrv"]:.0f} ms (base {r["hrv_base"]:.0f})'
                    if r["hrv"] and r["hrv_base"] else "non enregistrée")
         sleep_txt = f'{r["sleep"]}/100' if r.get("sleep") else "—"

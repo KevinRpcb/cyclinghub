@@ -6,9 +6,9 @@ vérifiable au retour par fitdecode.
 """
 import io
 import struct
-from datetime import datetime
+from datetime import datetime, timezone
 
-FIT_EPOCH = datetime(1989, 12, 31)
+FIT_EPOCH = datetime(1989, 12, 31, tzinfo=timezone.utc)
 
 BASE_ENUM = 0x00
 BASE_STRING = 0x07
@@ -72,7 +72,7 @@ def build_workout_fit(name: str, steps: list) -> bytes:
 
     watts = 0 → étape sans cible (open).
     """
-    ts = int((datetime.utcnow() - FIT_EPOCH).total_seconds())
+    ts = int((datetime.now(timezone.utc) - FIT_EPOCH).total_seconds())
     body = bytearray()
 
     fid_fields = [(0, BASE_ENUM), (1, BASE_UINT16), (2, BASE_UINT16),

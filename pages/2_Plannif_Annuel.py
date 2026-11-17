@@ -1,4 +1,5 @@
 import calendar as cal
+import html as _html
 import json
 from datetime import date, timedelta
 
@@ -126,8 +127,8 @@ else:
                 chips = ""
                 for rid in show_ids:
                     for kind, label, col in day_items(rid, d):
-                        nm = labels[rid].split(" — ")[0]
-                        short = label if len(label) <= 14 else label[:13] + "…"
+                        nm = _html.escape(labels[rid].split(" — ")[0])
+                        short = _html.escape(label if len(label) <= 14 else label[:13] + "…")
                         bg = col if kind == "block" else "transparent"
                         chips += (f'<div style="background:{bg};border:1px solid {col};'
                                   f'border-radius:3px;padding:1px 4px;font-size:10px;'

@@ -140,8 +140,9 @@ def team_simulation(segs: pd.DataFrame, riders: list, pull_s: float = 25.0,
 
 
 def best_order(segs: pd.DataFrame, riders: list, pull_s: float, gap: str,
-               rho: float, crr: float, eta: float, wind_ms: float,
-               wind_dir: float, max_perms: int = 720) -> dict:
+               rho: float, crr: float = 0.004, eta: float = 0.976,
+               wind_ms: float = 0.0, wind_dir: float = 0.0,
+               max_perms: int = 720) -> dict:
     """Cherche le meilleur ordre de rotation (force brute jusqu'à 6 coureurs,
     sinon heuristiques). Retourne {order, total_s, candidates}."""
     import itertools
