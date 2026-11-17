@@ -314,6 +314,21 @@ def bloc_label(b):
     return f"{mn:g}'"
 
 
+def etiq_label(b):
+    """Libellé façon étiquettes terrain : 3x15'/R45', 5x1'@PP3', 20'."""
+    reps, mn = float(b["reps"]), float(b["min"])
+    base = f"{reps:g}x{mn:g}'" if reps > 1 else f"{mn:g}'"
+    note = str(b.get("note", "")).strip()
+    if note and note not in ("—", "-"):
+        return f"{base}/{note}"
+    return base
+
+
+def unit_of(b):
+    return {"% CP": "W", "W": "W", "% FCmax": "bpm", "bpm": "bpm"}.get(
+        b["cible"], "")
+
+
 # ── Coureurs sélectionnés ─────────────────────────────────────
 if st.session_state.get("sv_selected"):
     kept = [n for n in st.session_state["sv_selected"] if n in names]
@@ -393,17 +408,20 @@ def rider_card(nm):
     cp = cp_of(nm)
     r0 = rider_by_name[nm]
     trs = []
-    for b in steps:
+    for i, b in enumerate(steps, 1):
         z, col = ZONE_META.get(b["zone"], ("?", "#94a3b8"))
+        u = unit_of(b)
+        badge = (f'<span style="font-size:9px;background:#f1f5f9;border:1px solid '
+                 f'#dde0e8;border-radius:3px;padding:1px 5px;color:#7a8194;'
+                 f'margin-left:5px">{u}</span>' if u else "")
         trs.append("<tr>"
                    + f'<td style="{_TD}">'
                      + f'<span style="display:inline-block;width:10px;height:10px;'
                        f'border-radius:2px;background:{col};margin-right:6px;'
                        f'vertical-align:middle"></span>'
-                     + _esc(b["bloc"]) + "</td>"
+                     + f'<b>{i}</b> · ' + _esc(b["bloc"]) + badge + "</td>"
                    + f'<td style="{_TD}">{z}</td>'
-                   + f'<td style="{_TD}">{bloc_label(b)}</td>'
-                   + f'<td style="{_TD}">{_esc(b.get("note", ""))}</td>'
+                   + f'<td style="{_TD}">{_esc(etiq_label(b))}</td>'
                    + f'<td style="{_TD};font-weight:700;white-space:nowrap">'
                      f'{target_of(nm, b)}</td>'
                    + "</tr>")
@@ -416,18 +434,18 @@ def rider_card(nm):
             f'FCmax {r0.get("hrmax", "—")} · total {total_min:.0f} min</div>'
             '<table style="width:100%;border-collapse:collapse;font-size:12px">'
             f'<tr><th style="{_TH}">Bloc</th><th style="{_TH}">Zone</th>'
-            f'<th style="{_TH}">Séance</th><th style="{_TH}">Note</th>'
-            f'<th style="{_TH}">Cible</th></tr>{"".join(trs)}</table></div>')
+            f'<th style="{_TH}">Séance</th><th style="{_TH}">Cible</th></tr>'
+            f'{"".join(trs)}</table></div>')
 
 
 def rider_sticker(nm):
     cp = cp_of(nm)
     lines = []
-    for b in steps:
+    for i, b in enumerate(steps, 1):
         z, col = ZONE_META.get(b["zone"], ("?", "#94a3b8"))
-        note = _esc(b.get("note", ""))
-        note_html = (f'<span style="color:#7a8194">· {note}</span>'
-                     if note and note != "—" else "")
+        u = unit_of(b)
+        badge = (f'<span style="color:#7a8194;font-size:8.5px"> [{u}]</span>'
+                 if u else "")
         lines.append(
             '<div style="display:flex;justify-content:space-between;'
             'align-items:baseline;gap:5px;padding:2.5px 0;'
@@ -436,8 +454,8 @@ def rider_sticker(nm):
             f'<span style="display:inline-block;width:7px;height:7px;'
             f'border-radius:2px;background:{col};margin-right:4px;'
             f'vertical-align:middle"></span>'
-            f'<b>{_esc(b["bloc"])}</b> '
-            f'<span style="color:#555">{bloc_label(b)}</span> {note_html}</span>'
+            f'<b>{i} {_esc(b["bloc"])}</b>{badge} '
+            f'<span style="color:#555">{_esc(etiq_label(b))}</span></span>'
             f'<b style="font-size:10px;white-space:nowrap;color:#111318">'
             f'{target_of(nm, b)}</b></div>')
     return ('<div style="width:58mm;height:86mm;border:1px dashed #9aa0ae;'
