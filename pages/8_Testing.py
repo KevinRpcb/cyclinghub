@@ -499,22 +499,22 @@ with t_sv1:
 with t_field:
     st.subheader("Collecte test de terrain")
     st.caption(
-        "Une ligne par coureur et par test. La **puissance révisée** applique la formule de "
+        "Une ligne par coureur et par test. Puissance et FC saisies = **moyennes sur la montée**. La **puissance révisée** applique la formule de "
         "l'équipe : P révisée = P − ((FC − 0,8 × FCmax) / FCmax) × P — la puissance est "
         "ajustée proportionnellement à l'écart de la FC par rapport à 80 % de la FCmax "
         "(au-dessus → révisée à la baisse, en dessous → à la hausse). "
         "🔴 rouge = perf suspecte (à vérifier avant d'exploiter) · "
         "🟠 orange = point de vigilance.")
 
-    FIELD_COLS = ["Nom", "Groupe", "Date", "Lieu", "Durée (min)", "Puissance (W)",
-                  "FC (bpm)", "FCmax (bpm)", "Récup 1' (bpm)", "Lactate (mmol/L)",
+    FIELD_COLS = ["Nom", "Groupe", "Date", "Lieu", "Durée (min)", "Puissance moy. (W)",
+                  "FC moy. (bpm)", "FCmax (bpm)", "Récup 1' (bpm)", "Lactate (mmol/L)",
                   "RPE", "Poids (kg)"]
     field_key = "field_collect"
     if not isinstance(st.session_state.get(field_key), pd.DataFrame) or \
             st.session_state[field_key].empty:
         st.session_state[field_key] = pd.DataFrame(
             [{"Nom": "", "Groupe": GROUPS[0], "Date": "", "Lieu": "",
-              "Durée (min)": None, "Puissance (W)": None, "FC (bpm)": None,
+              "Durée (min)": None, "Puissance moy. (W)": None, "FC moy. (bpm)": None,
               "FCmax (bpm)": None, "Récup 1' (bpm)": None, "Lactate (mmol/L)": None,
               "RPE": None, "Poids (kg)": None}])
     try:
@@ -530,10 +530,10 @@ with t_field:
                 "Durée (min)": st.column_config.NumberColumn("Durée (min)",
                                                              min_value=0.0,
                                                              max_value=600.0, step=0.5),
-                "Puissance (W)": st.column_config.NumberColumn("Puissance (W)",
+                "Puissance moy. (W)": st.column_config.NumberColumn("Puissance moy. (W)",
                                                                min_value=50,
                                                                max_value=1200, step=1),
-                "FC (bpm)": st.column_config.NumberColumn("FC (bpm)", min_value=80,
+                "FC moy. (bpm)": st.column_config.NumberColumn("FC moy. (bpm)", min_value=80,
                                                           max_value=230, step=1),
                 "FCmax (bpm)": st.column_config.NumberColumn("FCmax (bpm)",
                                                              min_value=120,
@@ -592,8 +592,8 @@ with t_field:
             nom = str(r.get("Nom") or "").strip()
             if not nom or nom.lower() == "nan":
                 continue
-            p = _num(r.get("Puissance (W)"))
-            fc = _num(r.get("FC (bpm)"))
+            p = _num(r.get("Puissance moy. (W)"))
+            fc = _num(r.get("FC moy. (bpm)"))
             fcmax = _num(r.get("FCmax (bpm)"))
             rec = _num(r.get("Récup 1' (bpm)"))
             la = _num(r.get("Lactate (mmol/L)"))
@@ -607,7 +607,7 @@ with t_field:
                 if str(x.get("Groupe") or "—") != grp or \
                         not str(x.get("Nom") or "").strip():
                     continue
-                xv = rev_power(_num(x.get("Puissance (W)")), _num(x.get("FC (bpm)")),
+                xv = rev_power(_num(x.get("Puissance moy. (W)")), _num(x.get("FC moy. (bpm)")),
                                _num(x.get("FCmax (bpm)")))
                 xkg = _num(x.get("Poids (kg)"))
                 if xv and xkg:
@@ -616,9 +616,9 @@ with t_field:
             rows.append({
                 "Nom": nom, "Groupe": grp, "Date": str(r.get("Date") or ""),
                 "Lieu": str(r.get("Lieu") or ""),
-                "Durée (min)": dur, "Puissance (W)": p,
+                "Durée (min)": dur, "Puissance moy. (W)": p,
                 "P révisée (W)": round(p_rev) if p_rev else None,
-                "FC (bpm)": fc, "FCmax (bpm)": fcmax,
+                "FC moy. (bpm)": fc, "FCmax (bpm)": fcmax,
                 "80% FCmax": round(0.8 * fcmax) if fcmax else None,
                 "Récup 1' (bpm)": rec, "Lactate (mmol/L)": la, "RPE": _num(r.get("RPE")),
                 "W/kg (révisée)": round(wkg, 2) if wkg else None,
