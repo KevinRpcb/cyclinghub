@@ -223,8 +223,9 @@ with t_lac:
         st.session_state[steps_key] = pd.DataFrame(
             {"Puissance (W)": [100, 150, 200, 250, 300, 350],
              "FC (bpm)": [None] * 6, "Lactate (mmol/L)": [None] * 6})
-    st.caption("Tape tes paliers puis clique sur 💾 Enregistrer — rien n'est "
-               "perdu pendant la frappe.")
+    st.caption("Tape tes paliers puis clique sur 💾 Enregistrer ou directement "
+               "sur 📊 Générer le rapport — rien n'est perdu pendant "
+               "la frappe.")
     try:
         with st.form(f"lac_form_{abs(hash(rider_sel)) % 10 ** 8}",
                      clear_on_submit=False):
@@ -243,14 +244,30 @@ with t_lac:
                                             "Lactate (mmol/L)", min_value=0.0,
                                             max_value=20.0, step=0.1, format="%.1f"),
                                     })
-            saved = st.form_submit_button("💾 Enregistrer les paliers")
+            b1, b2 = st.columns(2)
+            saved = b1.form_submit_button("💾 Enregistrer les paliers")
+            gen = b2.form_submit_button("📊 Générer le rapport",
+                                        type="primary")
     except Exception:
         st.session_state[steps_key] = pd.DataFrame(
             {"Puissance (W)": [None], "FC (bpm)": [None], "Lactate (mmol/L)": [None]})
         st.warning("Tableau réinitialisé (état incompatible détecté).")
         st.rerun()
-    if saved:
+    if saved or gen:
         st.session_state[steps_key] = edited
+    if gen:
+        results = {}
+        for n in sel:
+            steps = clean_steps(steps_of(n))
+            if sum(1 for _, _, la in steps if not np.isnan(la)) < 2:
+                continue
+            results[n] = analyze_rider(n, steps, method)
+        st.session_state["lac_results"] = results
+        if not results:
+            st.warning("Aucun palier lactate trouvé : il faut au moins 2 paliers avec "
+                       "une valeur de lactate saisie. Vérifie que tu as bien cliqué "
+                       "sur « Générer le rapport » dans le formulaire du "
+                       "coureur concerné.")
 
     up_lac = st.file_uploader("Importer des paliers saisis précédemment "
                               "(CSV « données brutes »)", type=["csv"], key="lac_import")
@@ -296,18 +313,10 @@ with t_lac:
         return [(row["Puissance (W)"], row["FC (bpm)"], row["Lactate (mmol/L)"])
                 for _, row in df.iterrows()]
 
-    if st.button("📊 Générer le rapport", type="primary"):
-        results = {}
-        for n in sel:
-            steps = clean_steps(steps_of(n))
-            if sum(1 for _, _, la in steps if not np.isnan(la)) < 2:
-                continue
-            results[n] = analyze_rider(n, steps, method)
-        st.session_state["lac_results"] = results
-        if not results:
-            st.warning("Aucun coureur avec au moins 2 paliers lactate saisis.")
-        else:
-            st.rerun()
+    st.caption("✅ Test SV1 minimal : 3 à 4 paliers suffisent. Avec la méthode "
+               "« base + 0,5 » ou « base + 1,0 », pas besoin d'atteindre "
+               "4 mmol/L — le rapport donne alors des zones provisoires ancrées "
+               "sur SV1 seule.")
 
     results = st.session_state.get("lac_results", {})
     if results:
