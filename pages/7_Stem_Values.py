@@ -25,9 +25,9 @@ elif client.notice:
     st.info(client.notice)
 
 st.title("🎯 Stem Values — constructeur de séances")
-st.caption("Construis une séance une fois : chaque bloc a sa zone, ses répétitions, sa note "
-           "(R45', PP3, follow…) et sa cible — % CP, watts précis, % FCmax ou bpm. "
-           "Les watts s'adaptent à chaque coureur. Impression à la carte + fichier compteur .fit.")
+st.caption("Construis une séance bloc par bloc : répétitions, durée, zone, cible en plage "
+           "(de–à) en % CP, watts, % FCmax ou bpm, et une note (R45', PP3, follow…). "
+           "Les watts s'adaptent à chaque coureur. Impression à la carte + fichier .fit.")
 
 # ── Coureurs (source) ─────────────────────────────────────────
 src = st.sidebar.radio("Source des données", ["Vekta (API)", "TrainingPeaks", "Fichier CSV"],
@@ -132,135 +132,183 @@ ZONE_RULES = {
     "Sprint": dict(pct=(160, 300), dmax=1.5, ddef=0.3, pdef=250),
 }
 
+
+def _t(bloc, reps, min, zone, cible, vmin, vmax=None, note=""):
+    return {"bloc": bloc, "reps": float(reps), "min": float(min), "zone": zone,
+            "cible": cible, "vmin": float(vmin),
+            "vmax": float(vmin if vmax is None else vmax), "note": note}
+
+
 TEMPLATES = {
     "Test de terrain 3 × 5 min (max)": [
-        ("Échauffement progressif", 1, 20, "Z2", "% CP", 60, ""),
-        ("Activation", 1, 4, "Z3", "% CP", 88, ""),
-        ("Test 1 — MAX", 1, 5, "Z5", "% CP", 130, "max"),
-        ("Récup", 1, 8, "Z1", "% CP", 45, ""),
-        ("Test 2 — MAX", 1, 5, "Z5", "% CP", 130, "max"),
-        ("Récup", 1, 8, "Z1", "% CP", 45, ""),
-        ("Test 3 — MAX", 1, 5, "Z5", "% CP", 130, "max"),
-        ("Retour au calme", 1, 15, "Z1", "% CP", 45, "")],
+        _t("Échauffement progressif", 1, 20, "Z2", "% CP", 60),
+        _t("Activation", 1, 4, "Z3", "% CP", 88),
+        _t("Test 1 — MAX", 1, 5, "Z5", "% CP", 125, 135, "max"),
+        _t("Récup", 1, 8, "Z1", "% CP", 45),
+        _t("Test 2 — MAX", 1, 5, "Z5", "% CP", 125, 135, "max"),
+        _t("Récup", 1, 8, "Z1", "% CP", 45),
+        _t("Test 3 — MAX", 1, 5, "Z5", "% CP", 125, 135, "max"),
+        _t("Retour au calme", 1, 15, "Z1", "% CP", 45)],
     "Seuil 2 × 20 min": [
-        ("Échauffement", 1, 20, "Z2", "% CP", 65, ""),
-        ("Activation", 1, 5, "Z3", "% CP", 88, ""),
-        ("Seuil", 2, 20, "Z4", "% CP", 100, ""),
-        ("Retour au calme", 1, 15, "Z1", "% CP", 45, "")],
+        _t("Échauffement", 1, 20, "Z2", "% CP", 65),
+        _t("Activation", 1, 5, "Z3", "% CP", 88),
+        _t("Seuil", 2, 20, "Z4", "% CP", 98, 102),
+        _t("Retour au calme", 1, 15, "Z1", "% CP", 45)],
     "Tempo 4 × 10 min": [
-        ("Échauffement", 1, 20, "Z2", "% CP", 65, ""),
-        ("Tempo", 4, 10, "Z3", "% CP", 88, ""),
-        ("Récup entre", 3, 5, "Z1", "% CP", 50, ""),
-        ("Retour au calme", 1, 15, "Z1", "% CP", 45, "")],
+        _t("Échauffement", 1, 20, "Z2", "% CP", 65),
+        _t("Tempo", 4, 10, "Z3", "% CP", 85, 90),
+        _t("Récup entre", 3, 5, "Z1", "% CP", 50),
+        _t("Retour au calme", 1, 15, "Z1", "% CP", 45)],
     "Climb + 1' repetitions": [
-        ("Climb", 3, 15, "Z3", "bpm", 172, "R45'"),
-        ("1' Repetitions", 5, 1, "Z5", "W", 530, "PP3"),
-        ("Retour au calme", 1, 15, "Z1", "% CP", 45, "")],
+        _t("Climb", 3, 15, "Z3", "bpm", 168, 176, "R45'"),
+        _t("1' Repetitions", 5, 1, "Z5", "W", 525, 540, "PP3"),
+        _t("Retour au calme", 1, 15, "Z1", "% CP", 45)],
     "Piste / crit : laps & sprints": [
-        ("Laps follow", 4, 3, "Z2", "—", 0, "follow"),
-        ("Laps in-and-out", 8, 2, "Z3", "—", 0, "in and out"),
-        ("Lead-outs", 4, 0.3, "Sprint", "% CP", 250, "lead-out / sprint"),
-        ("TT laps", 2, 4, "Z4", "% CP", 100, "TT laps"),
-        ("Retour au calme", 1, 15, "Z1", "% CP", 45, "")],
+        _t("Laps follow", 4, 3, "Z2", "—", 0, 0, "follow"),
+        _t("Laps in-and-out", 8, 2, "Z3", "—", 0, 0, "in and out"),
+        _t("Lead-outs", 4, 0.3, "Sprint", "% CP", 240, 260, "lead-out / sprint"),
+        _t("TT laps", 2, 4, "Z4", "% CP", 98, 102, "TT laps"),
+        _t("Retour au calme", 1, 15, "Z1", "% CP", 45)],
     "Sprints 8 × 10 s": [
-        ("Échauffement", 1, 25, "Z2", "% CP", 65, ""),
-        ("Activation", 1, 5, "Z3", "% CP", 88, ""),
-        ("Sprints", 8, 0.2, "Sprint", "% CP", 250, "assis, vent arrière"),
-        ("Récup entre", 7, 2.5, "Z1", "% CP", 45, ""),
-        ("Retour au calme", 1, 15, "Z1", "% CP", 45, "")],
+        _t("Échauffement", 1, 25, "Z2", "% CP", 65),
+        _t("Activation", 1, 5, "Z3", "% CP", 88),
+        _t("Sprints", 8, 0.2, "Sprint", "% CP", 240, 260, "assis, vent arrière"),
+        _t("Récup entre", 7, 2.5, "Z1", "% CP", 45),
+        _t("Retour au calme", 1, 15, "Z1", "% CP", 45)],
     "Récup active 45 min": [
-        ("Endurance souple", 1, 45, "Z1", "% CP", 45, "")],
+        _t("Endurance souple", 1, 45, "Z1", "% CP", 45)],
 }
 
-COLS = ["bloc", "reps", "min", "zone", "cible", "val", "note"]
-DEFAULT_STEPS = pd.DataFrame([list(t) for t in TEMPLATES["Test de terrain 3 × 5 min (max)"]],
-                             columns=COLS)
-if "sv_steps" not in st.session_state:
-    st.session_state["sv_steps"] = DEFAULT_STEPS.copy()
+COLS = ["bloc", "reps", "min", "zone", "cible", "vmin", "vmax", "note"]
+
+
+def _new_id():
+    st.session_state["sv_next_id"] = st.session_state.get("sv_next_id", 0) + 1
+    return st.session_state["sv_next_id"]
+
+
+def _blank_bloc():
+    return _t("Nouveau bloc", 1, 10, "Z2", "% CP", 65)
+
+
+if "sv_steps" not in st.session_state or not isinstance(st.session_state["sv_steps"], list):
+    st.session_state["sv_steps"] = [_t(**{k: x[k] for k in COLS})
+                                    for x in TEMPLATES["Test de terrain 3 × 5 min (max)"]]
+    for b in st.session_state["sv_steps"]:
+        b["id"] = _new_id()
 if "sv_prev_zones" not in st.session_state:
-    st.session_state["sv_prev_zones"] = DEFAULT_STEPS["zone"].tolist()
+    st.session_state["sv_prev_zones"] = {b["id"]: b["zone"] for b in st.session_state["sv_steps"]}
 
 tc1, tc2 = st.columns([2, 3])
 tpl = tc1.selectbox("Modèle de départ", ["(garder ma séance)"] + list(TEMPLATES.keys()),
                     key="sv_tpl")
 if tc2.button("📥 Charger ce modèle dans l'éditeur", key="sv_tpl_load"):
     if tpl != "(garder ma séance)":
-        st.session_state["sv_steps"] = pd.DataFrame([list(t) for t in TEMPLATES[tpl]],
-                                                    columns=COLS)
-        st.session_state["sv_prev_zones"] = st.session_state["sv_steps"]["zone"].tolist()
+        for k in list(st.session_state.keys()):
+            if k.startswith("sv_b"):
+                del st.session_state[k]
+        st.session_state["sv_steps"] = [_t(**{k: x[k] for k in COLS}) for x in TEMPLATES[tpl]]
+        for b in st.session_state["sv_steps"]:
+            b["id"] = _new_id()
+        st.session_state["sv_prev_zones"] = {b["id"]: b["zone"]
+                                             for b in st.session_state["sv_steps"]}
         st.rerun()
 
-st.subheader("✏️ La séance — un bloc par ligne")
-st.caption("Cible : **% CP** = % de la CP du coureur · **W** = watts précis (même valeur pour "
-           "tous) · **% FCmax** ou **bpm** = fréquence cardiaque · **—** = libre. "
-           "Note = R45', PP3, follow, in and out… Si tu changes la zone, la durée et le "
-           "% CP sont corrigés automatiquement s'ils sont incohérents (sinon rien ne bouge).")
-try:
-    edited = st.data_editor(
-        st.session_state["sv_steps"],
-        column_config={
-            "bloc": st.column_config.TextColumn("Bloc", required=True),
-            "reps": st.column_config.NumberColumn("Réps", min_value=1, max_value=30, step=1),
-            "min": st.column_config.NumberColumn("Durée/rép (min)", min_value=0.1,
-                                                 max_value=480.0, step=0.5),
-            "zone": st.column_config.SelectboxColumn("Zone", options=ZONES, required=True),
-            "cible": st.column_config.SelectboxColumn("Cible", options=CIBLES,
-                                                      required=True),
-            "val": st.column_config.NumberColumn("Valeur cible", min_value=0,
-                                                 max_value=2000, step=1),
-            "note": st.column_config.TextColumn("Note"),
-        },
-        num_rows="dynamic", use_container_width=True, key="sv_editor")
-except Exception:
-    st.session_state["sv_steps"] = DEFAULT_STEPS.copy()
-    st.session_state["sv_prev_zones"] = DEFAULT_STEPS["zone"].tolist()
-    st.warning("Éditeur réinitialisé (état incompatible détecté).")
-    st.rerun()
-
-# ── Garde-fous intelligents (zone changée → durée / % CP cohérents) ──
+# ── Garde-fous intelligents (zone changée → durée / cible cohérentes) ──
+steps_ls = st.session_state["sv_steps"]
 fixes = []
-ed = edited.copy()
-prev = st.session_state.get("sv_prev_zones") or []
-for i in ed.index:
-    z = ed.at[i, "zone"]
-    if z not in ZONE_RULES:
+for b in steps_ls:
+    z = b["zone"]
+    rule = ZONE_RULES.get(z)
+    if not rule:
         continue
-    rule = ZONE_RULES[z]
-    changed = not (i < len(prev) and prev[i] == z)
-    if pd.isna(ed.at[i, "reps"]):
-        ed.at[i, "reps"] = 1
-    if pd.isna(ed.at[i, "min"]) or (changed and float(ed.at[i, "min"]) > rule["dmax"]):
-        old = ed.at[i, "min"]
-        ed.at[i, "min"] = rule["ddef"]
-        if changed and not pd.isna(old):
-            fixes.append(f"« {ed.at[i, 'bloc']} » : {old:g} min est trop long en {z} → "
+    if st.session_state["sv_prev_zones"].get(b["id"]) != z:
+        if b["min"] > rule["dmax"]:
+            fixes.append(f"« {b['bloc']} » : {b['min']:g} min est trop long en {z} → "
                          f"{rule['ddef']:g} min")
-    if ed.at[i, "cible"] == "% CP":
-        v = ed.at[i, "val"]
-        lo, hi = rule["pct"]
-        if pd.isna(v) or (changed and not (lo <= float(v) <= hi)):
-            ed.at[i, "val"] = rule["pdef"]
-            if changed and not pd.isna(v):
-                fixes.append(f"« {ed.at[i, 'bloc']} » : {v:g} % CP est hors {z} → "
-                             f"{rule['pdef']} % CP")
-st.session_state["sv_prev_zones"] = ed["zone"].tolist()
-st.session_state["sv_steps"] = ed
+            b["min"] = rule["ddef"]
+            st.session_state.pop(f"sv_b{b['id']}_min", None)
+        if b["cible"] == "% CP":
+            lo, hi = rule["pct"]
+            if not (lo <= b["vmin"] <= hi) or not (lo <= b["vmax"] <= hi):
+                fixes.append(f"« {b['bloc']} » : {b['vmin']:g}–{b['vmax']:g} % CP est hors "
+                             f"{z} → {rule['pdef']} % CP")
+                b["vmin"] = b["vmax"] = rule["pdef"]
+                st.session_state.pop(f"sv_b{b['id']}_vmin", None)
+                st.session_state.pop(f"sv_b{b['id']}_vmax", None)
+        st.session_state["sv_prev_zones"][b["id"]] = z
 if fixes:
     st.warning("Corrigé automatiquement (change la valeur si tu veux autre chose) : "
                + " · ".join(fixes))
 
-steps = ed.dropna(subset=["bloc", "zone", "min"]).copy()
-steps = steps[steps["min"] > 0]
-if steps.empty:
+# ── Éditeur : un bloc par ligne ───────────────────────────────
+st.subheader("✏️ La séance — ajoute, enlève, réordonne les blocs librement")
+st.caption("Cible **de–à** : % CP (adapté à chaque coureur), W (watts précis, pareil pour "
+           "tous), % FCmax ou bpm (cardio), — (libre). Mets la même valeur deux fois pour "
+           "une cible unique.")
+hd = st.columns([2.2, 0.9, 1.1, 1.1, 1.3, 0.9, 0.9, 1.9, 1.2])
+for c, txt in zip(hd, ["Bloc", "Réps", "Durée/rép", "Zone", "Cible", "De", "À", "Note", ""]):
+    c.markdown(f'<span style="font-size:11px;font-weight:700;color:#7a8194">'
+               f'{txt}</span>', unsafe_allow_html=True)
+
+for idx, b in enumerate(steps_ls):
+    uid = b["id"]
+    with st.container(border=True):
+        c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(
+            [2.2, 0.9, 1.1, 1.1, 1.3, 0.9, 0.9, 1.9, 1.2])
+        b["bloc"] = c1.text_input("Bloc", b["bloc"], key=f"sv_b{uid}_nm",
+                                  label_visibility="collapsed")
+        b["reps"] = c2.number_input("Réps", 1, 30, int(b["reps"] or 1), key=f"sv_b{uid}_reps",
+                                    label_visibility="collapsed")
+        b["min"] = c3.number_input("Durée/rép (min)", 0.1, 480.0, float(b["min"]),
+                                   0.1, key=f"sv_b{uid}_min", label_visibility="collapsed")
+        b["zone"] = c4.selectbox("Zone", ZONES, index=ZONES.index(b["zone"])
+                                 if b["zone"] in ZONES else 1,
+                                 key=f"sv_b{uid}_zone", label_visibility="collapsed")
+        b["cible"] = c5.selectbox("Cible", CIBLES, index=CIBLES.index(b["cible"])
+                                  if b["cible"] in CIBLES else 0,
+                                  key=f"sv_b{uid}_cible", label_visibility="collapsed")
+        b["vmin"] = c6.number_input("De", 0, 2000, int(b["vmin"] or 0),
+                                    key=f"sv_b{uid}_vmin", label_visibility="collapsed")
+        b["vmax"] = c7.number_input("À", 0, 2000, int(b["vmax"] or 0),
+                                    key=f"sv_b{uid}_vmax", label_visibility="collapsed")
+        b["note"] = c8.text_input("Note", b.get("note", ""), key=f"sv_b{uid}_note",
+                                  label_visibility="collapsed")
+        if c9.button("🗑️", key=f"sv_b{uid}_del", help="Supprimer ce bloc"):
+            steps_ls.pop(idx)
+            st.rerun()
+        if c9.button("▲", key=f"sv_b{uid}_up", disabled=idx == 0,
+                     help="Monter ce bloc"):
+            steps_ls.insert(idx - 1, steps_ls.pop(idx))
+            st.rerun()
+        if c9.button("▼", key=f"sv_b{uid}_dn", disabled=idx == len(steps_ls) - 1,
+                     help="Descendre ce bloc"):
+            steps_ls.insert(idx + 1, steps_ls.pop(idx))
+            st.rerun()
+
+ab1, ab2 = st.columns(2)
+if ab1.button("➕ Ajouter un bloc", key="sv_add_bloc"):
+    nb = _blank_bloc()
+    nb["id"] = _new_id()
+    steps_ls.append(nb)
+    st.rerun()
+if ab2.button("🪄 Ajouter une récup après le dernier bloc", key="sv_add_rec"):
+    nb = _t("Récup", 1, 5, "Z1", "% CP", 45)
+    nb["id"] = _new_id()
+    steps_ls.append(nb)
+    st.rerun()
+
+steps = [b for b in steps_ls
+         if str(b.get("bloc", "")).strip() and float(b.get("min") or 0) > 0]
+if not steps:
     st.warning("La séance est vide — ajoute des blocs ou charge un modèle.")
     st.stop()
-steps["reps"] = steps["reps"].fillna(1)
-total_min = float((steps["reps"] * steps["min"]).sum())
+total_min = sum(float(b["reps"]) * float(b["min"]) for b in steps)
 st.caption(f"Séance : {len(steps)} blocs · {total_min:.0f} min au total.")
 
 
-def bloc_label(s):
-    reps, mn = float(s["reps"]), float(s["min"])
+def bloc_label(b):
+    reps, mn = float(b["reps"]), float(b["min"])
     if reps > 1:
         return f"{reps:g} × {mn:g}'"
     return f"{mn:g}'"
@@ -303,17 +351,113 @@ def watts_of(name, pct):
     return round(pct / 100.0 * cp * (1 + adj / 100.0))
 
 
-def target_of(name, s):
-    c, v = s["cible"], s["val"]
+def _rng(a, b, unit):
+    return f"{a} {unit}" if a == b else f"{a}–{b} {unit}"
+
+
+def target_of(name, b):
+    c = b["cible"]
+    lo, hi = float(b["vmin"] or 0), float(b["vmax"] or 0)
     if c == "% CP":
-        return f"{watts_of(name, float(v))} W"
+        w1, w2 = watts_of(name, lo), watts_of(name, max(lo, hi))
+        return _rng(w1, w2, "W")
     if c == "W":
-        return f"{float(v):g} W"
+        return _rng(f"{lo:g}", f"{max(lo, hi):g}", "W")
     if c == "% FCmax":
-        return f"{round(float(v) * hrmax_of(name) / 100)} bpm"
+        b1 = round(lo * hrmax_of(name) / 100)
+        b2 = round(max(lo, hi) * hrmax_of(name) / 100)
+        return _rng(b1, b2, "bpm")
     if c == "bpm":
-        return f"{float(v):g} bpm"
+        return _rng(f"{lo:g}", f"{max(lo, hi):g}", "bpm")
     return "libre"
+
+
+def _esc(t):
+    return _html.escape(str(t if t and str(t).strip() else "—"))
+
+
+PRINT_CSS = """
+*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+body{font-family:Arial,Helvetica,sans-serif;color:#111318;margin:0;padding:18px;font-size:14px}
+.printbtn{position:fixed;top:8px;right:8px;background:#111318;color:#fff;border:none;border-radius:6px;padding:10px 18px;font-weight:bold;font-size:14px;cursor:pointer;z-index:99}
+@media print{.printbtn{display:none!important}body{padding:6mm}}
+"""
+
+_TD = "padding:4px 7px;border-bottom:1px solid #eef0f4;color:#111318"
+_TH = ("background:#f4f5f7;text-align:left;padding:4px 7px;"
+       "border-bottom:1px solid #dde0e8;font-size:10px;text-transform:uppercase;"
+       "letter-spacing:.5px;color:#7a8194")
+
+
+def rider_card(nm):
+    cp = cp_of(nm)
+    r0 = rider_by_name[nm]
+    trs = []
+    for b in steps:
+        z, col = ZONE_META.get(b["zone"], ("?", "#94a3b8"))
+        trs.append("<tr>"
+                   + f'<td style="{_TD}">'
+                     + f'<span style="display:inline-block;width:10px;height:10px;'
+                       f'border-radius:2px;background:{col};margin-right:6px;'
+                       f'vertical-align:middle"></span>'
+                     + _esc(b["bloc"]) + "</td>"
+                   + f'<td style="{_TD}">{z}</td>'
+                   + f'<td style="{_TD}">{bloc_label(b)}</td>'
+                   + f'<td style="{_TD}">{_esc(b.get("note", ""))}</td>'
+                   + f'<td style="{_TD};font-weight:700;white-space:nowrap">'
+                     f'{target_of(nm, b)}</td>'
+                   + "</tr>")
+    return ('<div style="border:1px solid #dde0e8;border-radius:8px;padding:12px 14px;'
+            'max-width:760px;font-family:Arial,sans-serif;font-size:13px;'
+            'margin-bottom:14px">'
+            f'<h3 style="margin:0 0 2px;font-size:16px;color:#111318">{_esc(nm)}</h3>'
+            f'<div style="font-size:11px;color:#7a8194;margin-bottom:8px">CP {cp:.0f} W · '
+            f'{float(r0.get("weight") or 0):.0f} kg · '
+            f'FCmax {r0.get("hrmax", "—")} · total {total_min:.0f} min</div>'
+            '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+            f'<tr><th style="{_TH}">Bloc</th><th style="{_TH}">Zone</th>'
+            f'<th style="{_TH}">Séance</th><th style="{_TH}">Note</th>'
+            f'<th style="{_TH}">Cible</th></tr>{"".join(trs)}</table></div>')
+
+
+def rider_sticker(nm):
+    cp = cp_of(nm)
+    lines = []
+    for b in steps:
+        z, col = ZONE_META.get(b["zone"], ("?", "#94a3b8"))
+        note = _esc(b.get("note", ""))
+        note_html = (f'<span style="color:#7a8194">· {note}</span>'
+                     if note and note != "—" else "")
+        lines.append(
+            '<div style="display:flex;justify-content:space-between;'
+            'align-items:baseline;gap:5px;padding:2.5px 0;'
+            'border-bottom:1px solid #f1f2f6">'
+            '<span style="font-size:9.5px;color:#111318;min-width:0">'
+            f'<span style="display:inline-block;width:7px;height:7px;'
+            f'border-radius:2px;background:{col};margin-right:4px;'
+            f'vertical-align:middle"></span>'
+            f'<b>{_esc(b["bloc"])}</b> '
+            f'<span style="color:#555">{bloc_label(b)}</span> {note_html}</span>'
+            f'<b style="font-size:10px;white-space:nowrap;color:#111318">'
+            f'{target_of(nm, b)}</b></div>')
+    return ('<div style="width:58mm;height:86mm;border:1px dashed #9aa0ae;'
+            'border-radius:6px;padding:4mm;box-sizing:border-box;'
+            'display:flex;flex-direction:column;background:#fff;'
+            'font-family:Arial,sans-serif;page-break-inside:avoid">'
+            '<div style="display:flex;justify-content:space-between;'
+            'align-items:baseline;border-bottom:2px solid #111318;'
+            'padding-bottom:2mm">'
+            f'<b style="font-size:13px;color:#111318">{_esc(nm)}</b>'
+            f'<span style="font-size:9px;color:#7a8194">CP {cp:.0f}W · '
+            f'{total_min:.0f}\'</span></div>'
+            f'<div style="flex:1;overflow:hidden;padding-top:2mm">'
+            f'{"".join(lines)}</div>'
+            '<div style="font-size:8px;color:#7a8194;padding-top:2mm;'
+            'border-top:1px solid #e5e7ee;text-transform:uppercase;'
+            'letter-spacing:1px">'
+            f'{_esc(camp or "Séance")} · {_esc(day)} · '
+            f'{_esc(sdate.strftime("%d/%m/%Y"))}</div></div>')
+
 
 
 st.subheader("🧍 Adaptation par coureur")
@@ -324,12 +468,7 @@ a1.number_input(f"CP de {which} (W)", 100, 700, int(cp_of(which)), key=f"sv_cp_{
 a2.slider("Ajustement global (%)", -20, 20, int(st.session_state.get(f"sv_adj_{which}", 0)),
           key=f"sv_adj_{which}")
 a3.metric("Durée totale", f"{total_min:.0f} min")
-rows = []
-for _, s in steps.iterrows():
-    rows.append({"Bloc": s["bloc"], "Zone": s["zone"], "Séance": bloc_label(s),
-                 "Note": s["note"] if pd.notna(s["note"]) else "",
-                 "Cible": target_of(which, s)})
-st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+st.markdown(rider_card(which), unsafe_allow_html=True)
 
 # ── Fichiers compteurs (.fit) ─────────────────────────────────
 st.subheader("📥 Fichiers compteurs (.fit)")
@@ -338,18 +477,18 @@ st.subheader("📥 Fichiers compteurs (.fit)")
 def fit_bytes(name):
     wname = f"{(camp or 'Seance')} {day}".strip()[:14] or "Seance"
     fit_steps = []
-    for _, s in steps.iterrows():
-        if s["cible"] == "W":
-            w = int(float(s["val"]))
-        elif s["cible"] == "% CP":
-            w = watts_of(name, float(s["val"]))
+    for b in steps:
+        if b["cible"] == "W":
+            w = int(round((float(b["vmin"]) + max(float(b["vmin"]), float(b["vmax"]))) / 2))
+        elif b["cible"] == "% CP":
+            w = watts_of(name, (float(b["vmin"]) + max(float(b["vmin"]), float(b["vmax"]))) / 2)
         else:
             w = 0
-        lbl = f"{s['bloc'][:10]} {bloc_label(s)}"
+        lbl = f"{b['bloc'][:10]} {bloc_label(b)}"
         if w:
             lbl += f" @{w}W"
-        fit_steps.append({"name": lbl[:15], "seconds": int(round(float(s["reps"]) *
-                                                                 float(s["min"]) * 60)),
+        fit_steps.append({"name": lbl[:15],
+                          "seconds": int(round(float(b["reps"]) * float(b["min"]) * 60)),
                           "watts": w})
     return build_workout_fit(wname, fit_steps)
 
@@ -371,9 +510,10 @@ with dl2:
 
 # ── Document à imprimer ───────────────────────────────────────
 st.divider()
-st.subheader("🖨️ Document à imprimer")
+st.subheader("🖨️ Autocollants potence à imprimer")
 st.caption("Coche les coureurs à imprimer aujourd'hui (ex. J1 : 4 coureurs, J2 : 20). "
-           "Un cartouche par coureur, avec ses cibles à lui.")
+           "Un autocollant par coureur (58 × 86 mm), à découper le long des pointillés "
+           "et à coller sur la potence du vélo.")
 pr_cols = st.columns(min(len(selected), 6))
 print_sel = []
 for i, nm in enumerate(selected):
@@ -381,9 +521,6 @@ for i, nm in enumerate(selected):
         if st.checkbox(nm, value=True, key=f"sv_pr_{nm}"):
             print_sel.append(nm)
 
-
-def _esc(t):
-    return _html.escape(str(t if t and t == t else "—"))
 
 
 def _img_uri(up):
@@ -393,53 +530,7 @@ def _img_uri(up):
         base64.b64encode(up.getvalue()).decode()
 
 
-PRINT_CSS = """
-*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
-body{font-family:Arial,Helvetica,sans-serif;color:#111318;margin:0;padding:18px;font-size:14px}
-.printbtn{position:fixed;top:8px;right:8px;background:#111318;color:#fff;border:none;border-radius:6px;padding:10px 18px;font-weight:bold;font-size:14px;cursor:pointer;z-index:99}
-@media print{.printbtn{display:none!important}}
-.hero{display:flex;align-items:center;gap:16px;background:#111318;color:#fff;border-radius:10px;padding:14px 20px;margin-bottom:14px}
-.hero img{max-height:52px;max-width:140px;border-radius:4px;background:#fff;padding:3px}
-.kicker{font-size:10px;letter-spacing:2px;text-transform:uppercase;opacity:.6}
-.title{font-size:22px;font-weight:900;letter-spacing:1px}
-.sub{font-size:12px;opacity:.8}
-.tot{margin-left:auto;text-align:center;background:rgba(255,255,255,.12);border-radius:8px;padding:6px 16px}
-.tot b{font-size:20px;display:block}
-.card{border:1px solid #dde0e8;border-radius:8px;padding:12px 14px;margin-bottom:14px;page-break-inside:avoid}
-.card h3{margin:0 0 2px;font-size:16px}
-.meta{font-size:11px;color:#7a8194;margin-bottom:8px}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th{background:#f4f5f7;text-align:left;padding:4px 7px;border-bottom:1px solid #dde0e8;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#7a8194}
-td{padding:4px 7px;border-bottom:1px solid #eef0f4;color:#111318}
-.zc{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
-.w{font-weight:700;white-space:nowrap}
-.grid{display:grid;grid-template-columns:1fr;gap:12px}
-"""
-
-
-def rider_card(nm):
-    cp = cp_of(nm)
-    r0 = rider_by_name[nm]
-    trs = []
-    for _, s in steps.iterrows():
-        z, col = ZONE_META.get(s["zone"], ("?", "#94a3b8"))
-        note = str(s["note"]) if pd.notna(s["note"]) and str(s["note"]).strip() else ""
-        trs.append("<tr>"
-                   + f'<td><span class="zc" style="background:{col}"></span>'
-                     + _esc(s["bloc"]) + "</td>"
-                   + f"<td>{z}</td>"
-                   + f"<td>{bloc_label(s)}</td>"
-                   + f"<td>{_esc(note)}</td>"
-                   + f'<td class="w">{target_of(nm, s)}</td>'
-                   + "</tr>")
-    return (f'<div class="card"><h3>{_esc(nm)}</h3>'
-            f'<div class="meta">CP {cp:.0f} W · {float(r0.get("weight") or 0):.0f} kg · '
-            f'FCmax {r0.get("hrmax", "—")} · total {total_min:.0f} min</div>'
-            f'<table><tr><th>Bloc</th><th>Zone</th><th>Séance</th><th>Note</th>'
-            f'<th>Cible</th></tr>{"".join(trs)}</table></div>')
-
-
-if st.button("👁️ Préparer le document à imprimer", key="sv_print_prep"):
+if st.button("👁️ Préparer les autocollants à imprimer", key="sv_print_prep"):
     st.session_state["sv_print_open"] = True
 if st.session_state.get("sv_print_open"):
     if st.button("❌ Masquer le document", key="sv_print_hide"):
@@ -449,15 +540,18 @@ if st.session_state.get("sv_print_open"):
         st.warning("Coche au moins un coureur à imprimer.")
     else:
         logo = _img_uri(logo_up)
-        logo_html = f'<img src="{logo}">' if logo else ""
-        cards = "".join(rider_card(nm) for nm in print_sel)
+        logo_html = (f'<img src="{logo}" style="max-height:52px;max-width:140px;'
+                     f'border-radius:4px;background:#fff;padding:3px">' if logo else "")
+        grid = ('<div style="display:flex;flex-wrap:wrap;gap:4mm">'
+                + "".join(rider_sticker(nm) for nm in print_sel) + "</div>")
         doc = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>{PRINT_CSS}</style></head><body>
 <button class="printbtn" onclick="window.print()">🖨️ Imprimer</button>
-<div class="hero">{logo_html}<div><div class="kicker">Séance du jour · Stem Values</div>
-<div class="title">{_esc(camp or "Séance")}</div>
-<div class="sub">{_esc(day)} · {_esc(sdate.strftime("%d/%m/%Y"))} · {len(print_sel)} coureur(s)</div></div>
-<div class="tot"><span>Total</span><b>{total_min:.0f}'</b></div></div>
-<div class="grid">{cards}</div></body></html>"""
+<div style="display:flex;align-items:center;gap:16px;background:#111318;color:#fff;border-radius:10px;padding:14px 20px;margin-bottom:10px">
+{logo_html}<div><div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;opacity:.6">Séance du jour · Stem Values</div>
+<div style="font-size:22px;font-weight:900;letter-spacing:1px">{_esc(camp or "Séance")}</div>
+<div style="font-size:12px;opacity:.8">{_esc(day)} · {_esc(sdate.strftime("%d/%m/%Y"))} · {len(print_sel)} coureur(s) · découpe le long des pointillés</div></div>
+<div style="margin-left:auto;text-align:center;background:rgba(255,255,255,.12);border-radius:8px;padding:6px 16px"><span>Total</span><b style="font-size:20px;display:block">{total_min:.0f}'</b></div></div>
+{grid}</body></html>"""
         components.html(doc, height=1000, scrolling=True)
 
 st.caption("Zones ancrées sur la CP de chaque coureur. Aucune donnée ne quitte l'application.")
