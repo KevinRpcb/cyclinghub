@@ -76,9 +76,11 @@ if not riders:
     st.stop()
 
 names = [str(r.get("name")) for r in riders]
+prev_sel = [n for n in st.session_state.get("test_sel", []) if n in names]
 sel = st.multiselect(f"Coureurs du test ({len(names)} disponibles)", names,
-                     default=st.session_state.get("test_sel", names[: min(12, len(names))]),
-                     max_selections=40, key="test_sel")
+                     default=prev_sel or names[: min(12, len(names))],
+                     max_selections=40)
+st.session_state["test_sel"] = sel
 if not sel:
     st.info("Sélectionne au moins un coureur.")
     st.stop()
