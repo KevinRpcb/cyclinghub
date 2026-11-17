@@ -18,61 +18,109 @@ gate()
 
 GROUPS = ["WT Hommes", "WT Femmes", "Conti Hommes", "Conti Femmes"]
 
-client = VektaClient()
-athletes = client.get_athletes()
-if client.last_error:
-    st.warning(f"Vekta : {client.last_error} — données de démonstration affichées.")
-elif client.notice:
-    st.info(client.notice)
-
 src = st.sidebar.radio("Source des données",
                        ["Vekta (API)", "TrainingPeaks", "Fichier CSV"], key="test_src")
-riders = []
-if src == "TrainingPeaks":
-    tp = session_client()
-    if not tp.configured:
-        st.sidebar.warning("TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD dans les "
-                           "Secrets Streamlit.")
-    else:
-        tp_riders = tp.get_athletes()
-        if not tp_riders:
-            st.sidebar.warning(f"TrainingPeaks : {tp.last_error}")
+if st.sidebar.button("🔄 Recharger les données"):
+    for k in ("test_riders", "test_sig", "test_src_note"):
+        st.session_state.pop(k, None)
+    st.rerun()
+
+up = (st.sidebar.file_uploader("database_CP.csv", type=["csv"])
+      if src == "Fichier CSV" else None)
+sig = (src, up.name if up else "", len(up.getvalue()) if up else 0)
+
+if st.session_state.get("test_sig") != sig:
+    riders, notes = [], []
+    if src == "TrainingPeaks":
+        tp = session_client()
+        if not tp.configured:
+            notes.append(("warning", "TrainingPeaks : ajoute TP_USERNAME et TP_PASSWORD "
+                                     "dans les Secrets Streamlit."))
         else:
-            for a in tp_riders:
-                cp = tp.get_cp_estimate(a["id"]).get("cp")
-                if not cp:
-                    continue
-                riders.append({"name": a.get("name", a["id"]),
-                               "team": a.get("team", a.get("role", "Team")),
-                               "hrmax": a.get("hrmax", 185),
-                               "weight": a.get("weight", 70), "cp": cp})
-if src == "Vekta (API)":
-    for a in athletes:
-        pp = client.get_power_profile(a["id"])
-        riders.append({"name": a.get("name", a["id"]),
-                       "team": a.get("team", a.get("role", "Team")),
-                       "hrmax": a.get("hrmax", 185), "weight": a.get("weight", 70), **pp})
-elif src == "Fichier CSV":
-    up = st.sidebar.file_uploader("database_CP.csv", type=["csv"])
-    if up:
+            tp_riders = tp.get_athletes()
+            if not tp_riders:
+                notes.append(("warning", f"TrainingPeaks : {tp.last_error}"))
+            else:
+                for a in tp_riders:
+                    cp = tp.get_cp_estimate(a["id"]).get("cp")
+                    if not cp:
+                        continue
+                    riders.append({"name": a.get("name", a["id"]),
+                                   "team": a.get("team", a.get("role", "Team")),
+                                   "hrmax": a.get("hrmax", 185),
+                                   "weight": a.get("weight", 70), "cp": cp})
+    elif src == "Vekta (API)":
+        vekta = VektaClient()
+        athletes = vekta.get_athletes()
+        if vekta.last_error:
+            notes.append(("warning", f"Vekta : {vekta.last_error} — données de "
+                                     "démonstration affichées."))
+        elif vekta.notice:
+            notes.append(("info", vekta.notice))
+        for a in athletes:
+            pp = vekta.get_power_profile(a["id"])
+            riders.append({"name": a.get("name", a["id"]),
+                           "team": a.get("team", a.get("role", "Team")),
+                           "hrmax": a.get("hrmax", 185),
+                           "weight": a.get("weight", 70), **pp})
+    elif up:
         riders, note = parse_riders_csv(up.getvalue())
         if note and not note.startswith("("):
-            st.sidebar.error(note)
+            notes.append(("error", note))
+            riders = []
         elif riders:
             store_csv(up.name, riders)
-            st.sidebar.success(f"{len(riders)} coureur(s) chargé(s) depuis le CSV{note}")
+            notes.append(("success", f"{len(riders)} coureur(s) chargé(s) depuis le "
+                                     f"CSV{note}"))
     elif cached_csv():
         cache = cached_csv()
         riders = cache["riders"]
-        st.sidebar.info(f"CSV conservé : **{cache['name']}** ({len(riders)} coureur(s)).")
+        notes.append(("info", f"CSV conservé : **{cache['name']}** "
+                              f"({len(riders)} coureur(s))."))
+    st.session_state["test_riders"] = riders
+    st.session_state["test_sig"] = sig
+    st.session_state["test_src_note"] = notes
+
+riders = st.session_state.get("test_riders") or []
+for level, msg in st.session_state.get("test_src_note", []):
+    getattr(st.sidebar, level)(msg)
 
 st.title("🧪 Testing — lactate & SV1")
 st.caption("Test lactate par paliers → seuils SV1/SV2, zones watts/FC et rapport. "
            "Test SV1 3×15' → zone cible en amont, lactates par bloc, analyse par coureur "
            "et par groupe. Les données restent dans ta session — exporte en CSV pour les garder.")
 
+with st.expander("➕ Ajouter des coureurs manuellement (hors Vekta / TP)"):
+    st.caption("Utile pour un test avec des coureurs hors plateforme — ils restent "
+               "dans ta session.")
+    new_names = st.text_area("Un nom par ligne", key="test_manual_input", height=80,
+                             placeholder="Nom Prénom")
+    mc1, mc2 = st.columns(2)
+    manual_w = mc1.number_input("Poids par défaut (kg)", 30.0, 120.0, 70.0, 0.5,
+                                key="test_manual_weight")
+    if mc2.button("Ajouter ces coureurs"):
+        existing = {str(r.get("name")) for r in riders}
+        added = 0
+        for line in (new_names or "").splitlines():
+            nm = line.strip()
+            if nm and nm not in existing:
+                st.session_state.setdefault("test_manual_riders", []).append(
+                    {"name": nm, "team": "Manuel", "hrmax": 185,
+                     "weight": manual_w, "cp": None})
+                existing.add(nm)
+                added += 1
+        if added:
+            st.rerun()
+        else:
+            st.info("Rien à ajouter (vide ou déjà présent).")
+
+manual = st.session_state.get("test_manual_riders", [])
+known = {str(r.get("name")) for r in riders}
+riders = riders + [m for m in manual if str(m.get("name")) not in known]
+
 if not riders:
-    st.info("Aucune donnée coureur — choisis une source dans la barre latérale.")
+    st.info("Aucune donnée coureur — choisis une source dans la barre latérale "
+            "ou ajoute des coureurs manuellement ci-dessus.")
     st.stop()
 
 names = [str(r.get("name")) for r in riders]
