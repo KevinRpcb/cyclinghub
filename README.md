@@ -20,10 +20,14 @@ core/
   course.py               GPX/FIT, segments, météo Open-Meteo, pacing
 pages/
   1_Fiche_Coureur.py      Page par coureur : métriques + analyse IA complète
-  2_TT_Center.py          Suivi efforts CLM, PPR, estimation SCx, cible rapide
-  3_Prevision_Perf.py     GPX/FIT → pacing + watts (type BestBikeSplit)
-  4_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
-  5_Labo.py               Veille PubMed multi-IA, brainstorming, propositions
+  2_Plannif_Annuel.py     Calendrier par coureur, blocs, coach IA, sauvegarde chiffrée
+  3_TT_Center.py          Suivi efforts CLM, PPR, estimation SCx, cible rapide
+  4_Prevision_Perf.py     GPX/FIT → pacing + watts (type BestBikeSplit)
+  5_Mode_TTT.py           Simulateur TTT, ordre de relais, analyse post-course
+  6_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
+  7_Stem_Values.py        Constructeur de séances : watts par coureur, print à la carte, .fit
+  8_Labo.py               Veille PubMed multi-IA, brainstorming, propositions
+  9_Rapport_Equipe.py     Rapport d'équipe : fiches, PPR, fatigue, PDF
 ```
 
 ## Secrets requis (Streamlit Cloud → App → Settings → Secrets)
