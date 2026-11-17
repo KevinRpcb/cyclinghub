@@ -10,7 +10,8 @@ from core.vekta import VektaClient
 from core.tp import TPClient, session_client
 from core.riders import parse_riders_csv, cached_csv, store_csv
 from core.lactate import (SV1_METHODS, baseline_lactate, clean_steps, sv1,
-                          sv1_block_verdict, sv1_trend, sv2, zone_table)
+                          sv1_block_verdict, sv1_trend, sv2, zone_table,
+                          zone_table_partial)
 from core.powermodel import CP_ZONE_PCTS, cp_from_5_20, cp_zone_table
 
 st.set_page_config(page_title="Testing — WT Performance Hub", page_icon="🧪", layout="wide")
@@ -114,6 +115,20 @@ with st.expander("➕ Ajouter des coureurs manuellement (hors Vekta / TP)"):
         else:
             st.info("Rien à ajouter (vide ou déjà présent).")
 
+    manual_now = st.session_state.get("test_manual_riders", [])
+    if manual_now:
+        rem = st.multiselect("Retirer des coureurs ajoutés manuellement",
+                             [m["name"] for m in manual_now],
+                             key="test_manual_remove")
+        if st.button("🗑️ Retirer ces coureurs") and rem:
+            st.session_state["test_manual_riders"] = [
+                m for m in manual_now if m["name"] not in rem]
+            for nm in rem:
+                st.session_state.pop(f"lac_steps_{nm}", None)
+                st.session_state.pop(f"lac_ed_{nm}", None)
+                st.session_state.get("sv1_data", {}).pop(nm, None)
+            st.rerun()
+
 manual = st.session_state.get("test_manual_riders", [])
 known = {str(r.get("name")) for r in riders}
 riders = riders + [m for m in manual if str(m.get("name")) not in known]
@@ -208,25 +223,34 @@ with t_lac:
         st.session_state[steps_key] = pd.DataFrame(
             {"Puissance (W)": [100, 150, 200, 250, 300, 350],
              "FC (bpm)": [None] * 6, "Lactate (mmol/L)": [None] * 6})
+    st.caption("Tape tes paliers puis clique sur 💾 Enregistrer — rien n'est "
+               "perdu pendant la frappe.")
     try:
-        edited = st.data_editor(st.session_state[steps_key], key=f"lac_ed_{rider_sel}",
-                                hide_index=True, use_container_width=True,
-                                num_rows="dynamic",
-                                column_config={
-                                    "Puissance (W)": st.column_config.NumberColumn(
-                                        "Puissance (W)", min_value=50, max_value=1200, step=5),
-                                    "FC (bpm)": st.column_config.NumberColumn(
-                                        "FC (bpm)", min_value=80, max_value=230, step=1),
-                                    "Lactate (mmol/L)": st.column_config.NumberColumn(
-                                        "Lactate (mmol/L)", min_value=0.0, max_value=20.0,
-                                        step=0.1, format="%.1f"),
-                                })
+        with st.form(f"lac_form_{abs(hash(rider_sel)) % 10 ** 8}",
+                     clear_on_submit=False):
+            edited = st.data_editor(st.session_state[steps_key],
+                                    key=f"lac_ed_{rider_sel}",
+                                    hide_index=True, use_container_width=True,
+                                    num_rows="dynamic",
+                                    column_config={
+                                        "Puissance (W)": st.column_config.NumberColumn(
+                                            "Puissance (W)", min_value=50,
+                                            max_value=1200, step=5),
+                                        "FC (bpm)": st.column_config.NumberColumn(
+                                            "FC (bpm)", min_value=80, max_value=230,
+                                            step=1),
+                                        "Lactate (mmol/L)": st.column_config.NumberColumn(
+                                            "Lactate (mmol/L)", min_value=0.0,
+                                            max_value=20.0, step=0.1, format="%.1f"),
+                                    })
+            saved = st.form_submit_button("💾 Enregistrer les paliers")
     except Exception:
         st.session_state[steps_key] = pd.DataFrame(
             {"Puissance (W)": [None], "FC (bpm)": [None], "Lactate (mmol/L)": [None]})
         st.warning("Tableau réinitialisé (état incompatible détecté).")
         st.rerun()
-    st.session_state[steps_key] = edited
+    if saved:
+        st.session_state[steps_key] = edited
 
     up_lac = st.file_uploader("Importer des paliers saisis précédemment "
                               "(CSV « données brutes »)", type=["csv"], key="lac_import")
@@ -298,27 +322,39 @@ with t_lac:
                     f"**SV2 : {_fmt(res['p_sv2'])} W ({wkg}) / {_fmt(res['hr_sv2'])} bpm** · "
                     f"Pmax test {_fmt(res['pmax'])} W · "
                     f"FCmax observée {_fmt(res['fcmax'])} bpm")
+                if not res["p_sv2"] and res["p_sv1"]:
+                    st.warning("SV2 (4 mmol/L) non atteinte pendant le test — zones "
+                               "provisoires ancrées sur SV1. Ajoute un ou deux paliers "
+                               "plus durs, ou fixe SV2 à la main ci-dessous.")
+                if res["p_sv1"] and res["pmax"] and res["p_sv1"] > 0.85 * res["pmax"]:
+                    st.warning("SV1 à plus de 85 % de la Pmax du test : paliers trop "
+                               "espacés ou test trop court — SV1 peu fiable, "
+                               "refais le test avec des paliers plus fins.")
                 c1, c2 = st.columns(2)
                 with c1:
                     st.markdown("**Zones puissance (W)**")
-                    if zw:
+                    ztab = zw or zone_table_partial(res["p_sv1"])
+                    if ztab:
                         st.dataframe(pd.DataFrame(
                             [{"Zone": z, "Bas (W)": round(lo) if lo else "—",
                               "Haut (W)": round(hi) if hi else "ouvert"}
-                             for z, lo, hi in zw]), hide_index=True, use_container_width=True)
+                             for z, lo, hi in ztab]), hide_index=True, use_container_width=True)
                     else:
                         st.info("Seuils incomplets — complète les lactates ou ajuste à la main.")
                 with c2:
                     st.markdown("**Zones fréquence cardiaque (bpm)**")
-                    if zh:
+                    zhtab = zh or zone_table_partial(res["hr_sv1"])
+                    if zhtab:
                         st.dataframe(pd.DataFrame(
                             [{"Zone": z, "Bas (bpm)": round(lo) if lo else "—",
                               "Haut (bpm)": round(hi) if hi else "ouvert"}
-                             for z, lo, hi in zh]), hide_index=True, use_container_width=True)
+                             for z, lo, hi in zhtab]), hide_index=True,
+                            use_container_width=True)
                     else:
                         st.info("FC manquantes aux paliers — zones FC indisponibles.")
-                pts_la = [(p, la) for p, _, la in steps_of(n) if not np.isnan(la)]
-                pts_hr = [(p, hr) for p, hr, _ in steps_of(n) if not np.isnan(hr)]
+                steps_c = clean_steps(steps_of(n))
+                pts_la = [(p, la) for p, _, la in steps_c if not np.isnan(la)]
+                pts_hr = [(p, hr) for p, hr, _ in steps_c if not np.isnan(hr)]
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=[p for p, _ in pts_la], y=[la for _, la in pts_la],
                                          mode="lines+markers", name="Lactate (mmol/L)",
@@ -570,45 +606,50 @@ with t_field:
               "Durée (min)": None, "Puissance moy. (W)": None, "FC moy. (bpm)": None,
               "FCmax (bpm)": None, "Récup 1' (bpm)": None, "Lactate (mmol/L)": None,
               "RPE": None, "Poids (kg)": None}])
+    st.caption("Saisis puis clique sur 💾 Enregistrer — rien n'est perdu "
+               "pendant la frappe.")
     try:
-        fdf = st.data_editor(
-            st.session_state[field_key].reindex(columns=FIELD_COLS), key="field_ed",
-            hide_index=True, use_container_width=True, num_rows="dynamic",
-            column_config={
-                "Nom": st.column_config.TextColumn("Nom", required=True),
-                "Groupe": st.column_config.SelectboxColumn("Groupe", options=GROUPS,
-                                                           required=True),
-                "Date": st.column_config.TextColumn("Date", help="JJ/MM/AAAA"),
-                "Lieu": st.column_config.TextColumn("Lieu"),
-                "Durée (min)": st.column_config.NumberColumn("Durée (min)",
-                                                             min_value=0.0,
-                                                             max_value=600.0, step=0.5),
-                "Puissance moy. (W)": st.column_config.NumberColumn("Puissance moy. (W)",
-                                                               min_value=50,
-                                                               max_value=1200, step=1),
-                "FC moy. (bpm)": st.column_config.NumberColumn("FC moy. (bpm)", min_value=80,
-                                                          max_value=230, step=1),
-                "FCmax (bpm)": st.column_config.NumberColumn("FCmax (bpm)",
-                                                             min_value=120,
-                                                             max_value=230, step=1),
-                "Récup 1' (bpm)": st.column_config.NumberColumn("Récup 1' (bpm)",
-                                                                min_value=60,
-                                                                max_value=230, step=1),
-                "Lactate (mmol/L)": st.column_config.NumberColumn(
-                    "Lactate (mmol/L)", min_value=0.0, max_value=20.0, step=0.1,
-                    format="%.1f"),
-                "RPE": st.column_config.NumberColumn("RPE", min_value=1.0,
-                                                     max_value=10.0, step=0.5),
-                "Poids (kg)": st.column_config.NumberColumn("Poids (kg)",
-                                                            min_value=30.0,
-                                                            max_value=120.0, step=0.5),
-            })
+        with st.form("field_form", clear_on_submit=False):
+            fdf = st.data_editor(
+                st.session_state[field_key].reindex(columns=FIELD_COLS), key="field_ed",
+                hide_index=True, use_container_width=True, num_rows="dynamic",
+                column_config={
+                    "Nom": st.column_config.TextColumn("Nom", required=True),
+                    "Groupe": st.column_config.SelectboxColumn("Groupe", options=GROUPS,
+                                                               required=True),
+                    "Date": st.column_config.TextColumn("Date", help="JJ/MM/AAAA"),
+                    "Lieu": st.column_config.TextColumn("Lieu"),
+                    "Durée (min)": st.column_config.NumberColumn("Durée (min)",
+                                                                 min_value=0.0,
+                                                                 max_value=600.0,
+                                                                 step=0.5),
+                    "Puissance moy. (W)": st.column_config.NumberColumn(
+                        "Puissance moy. (W)", min_value=50, max_value=1200, step=1),
+                    "FC moy. (bpm)": st.column_config.NumberColumn(
+                        "FC moy. (bpm)", min_value=80, max_value=230, step=1),
+                    "FCmax (bpm)": st.column_config.NumberColumn("FCmax (bpm)",
+                                                                 min_value=120,
+                                                                 max_value=230, step=1),
+                    "Récup 1' (bpm)": st.column_config.NumberColumn(
+                        "Récup 1' (bpm)", min_value=60, max_value=230, step=1),
+                    "Lactate (mmol/L)": st.column_config.NumberColumn(
+                        "Lactate (mmol/L)", min_value=0.0, max_value=20.0, step=0.1,
+                        format="%.1f"),
+                    "RPE": st.column_config.NumberColumn("RPE", min_value=1.0,
+                                                         max_value=10.0, step=0.5),
+                    "Poids (kg)": st.column_config.NumberColumn("Poids (kg)",
+                                                                min_value=30.0,
+                                                                max_value=120.0,
+                                                                step=0.5),
+                })
+            saved_f = st.form_submit_button("💾 Enregistrer la collecte")
     except Exception:
         st.session_state[field_key] = pd.DataFrame(
             [{c: None for c in FIELD_COLS}])
         st.warning("Tableau réinitialisé (état incompatible détecté).")
         st.rerun()
-    st.session_state[field_key] = fdf
+    if saved_f:
+        st.session_state[field_key] = fdf
 
     RED_FLAGS = {"FC ≥ FCmax", "W/kg atypique vs groupe"}
 
@@ -751,31 +792,37 @@ with t_cp:
             [{"Nom": "", "Groupe": GROUPS[0], "P 5′ (W)": None,
               "FC moy. 5′ (bpm)": None, "P 20′ (W)": None,
               "FC moy. 20′ (bpm)": None, "Poids (kg)": None}])
+    st.caption("Saisis puis clique sur 💾 Enregistrer — rien n'est perdu "
+               "pendant la frappe.")
     try:
-        cdf = st.data_editor(
-            st.session_state[cp_key].reindex(columns=CP_COLS), key="cp_ed",
-            hide_index=True, use_container_width=True, num_rows="dynamic",
-            column_config={
-                "Nom": st.column_config.TextColumn("Nom", required=True),
-                "Groupe": st.column_config.SelectboxColumn("Groupe", options=GROUPS,
-                                                           required=True),
-                "P 5′ (W)": st.column_config.NumberColumn("P 5′ (W)", min_value=100,
-                                                          max_value=1200, step=1),
-                "FC moy. 5′ (bpm)": st.column_config.NumberColumn(
-                    "FC moy. 5′ (bpm)", min_value=80, max_value=230, step=1),
-                "P 20′ (W)": st.column_config.NumberColumn("P 20′ (W)", min_value=100,
-                                                           max_value=1200, step=1),
-                "FC moy. 20′ (bpm)": st.column_config.NumberColumn(
-                    "FC moy. 20′ (bpm)", min_value=80, max_value=230, step=1),
-                "Poids (kg)": st.column_config.NumberColumn("Poids (kg)",
-                                                            min_value=30.0,
-                                                            max_value=120.0, step=0.5),
-            })
+        with st.form("cp_form", clear_on_submit=False):
+            cdf = st.data_editor(
+                st.session_state[cp_key].reindex(columns=CP_COLS), key="cp_ed",
+                hide_index=True, use_container_width=True, num_rows="dynamic",
+                column_config={
+                    "Nom": st.column_config.TextColumn("Nom", required=True),
+                    "Groupe": st.column_config.SelectboxColumn("Groupe", options=GROUPS,
+                                                               required=True),
+                    "P 5′ (W)": st.column_config.NumberColumn(
+                        "P 5′ (W)", min_value=100, max_value=1200, step=1),
+                    "FC moy. 5′ (bpm)": st.column_config.NumberColumn(
+                        "FC moy. 5′ (bpm)", min_value=80, max_value=230, step=1),
+                    "P 20′ (W)": st.column_config.NumberColumn(
+                        "P 20′ (W)", min_value=100, max_value=1200, step=1),
+                    "FC moy. 20′ (bpm)": st.column_config.NumberColumn(
+                        "FC moy. 20′ (bpm)", min_value=80, max_value=230, step=1),
+                    "Poids (kg)": st.column_config.NumberColumn("Poids (kg)",
+                                                                min_value=30.0,
+                                                                max_value=120.0,
+                                                                step=0.5),
+                })
+            saved_c = st.form_submit_button("💾 Enregistrer le test")
     except Exception:
         st.session_state[cp_key] = pd.DataFrame([{c: None for c in CP_COLS}])
         st.warning("Tableau réinitialisé (état incompatible détecté).")
         st.rerun()
-    st.session_state[cp_key] = cdf
+    if saved_c:
+        st.session_state[cp_key] = cdf
 
     def cp_computed(df):
         rows = []

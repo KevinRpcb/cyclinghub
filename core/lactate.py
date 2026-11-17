@@ -119,3 +119,12 @@ def sv1_trend(las):
                 "équilibre limite — cible un peu haute, surveille le 3e bloc")
     return ("lactate stable",
             "équilibre atteint — zone bien calée pour tenir 3 × 15'")
+
+
+def zone_table_partial(lo):
+    """Zones provisoires ancrées sur SV1 seul (SV2 non atteinte pendant le test)."""
+    if not _is_num(lo) or np.isnan(float(lo)) or lo <= 0:
+        return None
+    return [("Z1 · Récupération", None, lo),
+            ("Z2 · Endurance", lo, lo * 1.12),
+            ("Z3+ · Provisoire — SV2 non atteinte", lo * 1.12, None)]
