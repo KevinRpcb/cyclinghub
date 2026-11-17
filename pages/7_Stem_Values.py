@@ -425,7 +425,8 @@ def rider_card(nm):
                    + f'<td style="{_TD};font-weight:700;white-space:nowrap">'
                      f'{target_of(nm, b)}</td>'
                    + "</tr>")
-    return ('<div style="border:1px solid #dde0e8;border-radius:8px;padding:12px 14px;'
+    return ('<div style="border:1px solid #dde0e8;border-radius:8px;'
+            'background:#fff;color:#111318;padding:12px 14px;'
             'max-width:760px;font-family:Arial,sans-serif;font-size:13px;'
             'margin-bottom:14px">'
             f'<h3 style="margin:0 0 2px;font-size:16px;color:#111318">{_esc(nm)}</h3>'
@@ -448,9 +449,9 @@ def rider_sticker(nm):
                  if u else "")
         lines.append(
             '<div style="display:flex;justify-content:space-between;'
-            'align-items:baseline;gap:5px;padding:2.5px 0;'
+            'align-items:baseline;gap:4px;padding:2px 0;'
             'border-bottom:1px solid #f1f2f6">'
-            '<span style="font-size:9.5px;color:#111318;min-width:0">'
+            '<span style="font-size:9px;color:#111318;min-width:0">'
             f'<span style="display:inline-block;width:7px;height:7px;'
             f'border-radius:2px;background:{col};margin-right:4px;'
             f'vertical-align:middle"></span>'
@@ -458,19 +459,19 @@ def rider_sticker(nm):
             f'<span style="color:#555">{_esc(etiq_label(b))}</span></span>'
             f'<b style="font-size:10px;white-space:nowrap;color:#111318">'
             f'{target_of(nm, b)}</b></div>')
-    return ('<div style="width:58mm;height:86mm;border:1px dashed #9aa0ae;'
-            'border-radius:6px;padding:4mm;box-sizing:border-box;'
+    return ('<div style="width:54mm;height:76mm;border:1px dashed #9aa0ae;'
+            'border-radius:5px;padding:3.5mm;box-sizing:border-box;'
             'display:flex;flex-direction:column;background:#fff;'
             'font-family:Arial,sans-serif;page-break-inside:avoid">'
             '<div style="display:flex;justify-content:space-between;'
             'align-items:baseline;border-bottom:2px solid #111318;'
-            'padding-bottom:2mm">'
-            f'<b style="font-size:13px;color:#111318">{_esc(nm)}</b>'
-            f'<span style="font-size:9px;color:#7a8194">CP {cp:.0f}W · '
+            'padding-bottom:1.5mm">'
+            f'<b style="font-size:12px;color:#111318">{_esc(nm)}</b>'
+            f'<span style="font-size:8.5px;color:#7a8194">CP {cp:.0f}W · '
             f'{total_min:.0f}\'</span></div>'
-            f'<div style="flex:1;overflow:hidden;padding-top:2mm">'
+            f'<div style="flex:1;overflow:hidden;padding-top:1.5mm">'
             f'{"".join(lines)}</div>'
-            '<div style="font-size:8px;color:#7a8194;padding-top:2mm;'
+            '<div style="font-size:7.5px;color:#7a8194;padding-top:1.5mm;'
             'border-top:1px solid #e5e7ee;text-transform:uppercase;'
             'letter-spacing:1px">'
             f'{_esc(camp or "Séance")} · {_esc(day)} · '
@@ -560,16 +561,18 @@ if st.session_state.get("sv_print_open"):
         logo = _img_uri(logo_up)
         logo_html = (f'<img src="{logo}" style="max-height:52px;max-width:140px;'
                      f'border-radius:4px;background:#fff;padding:3px">' if logo else "")
-        grid = ('<div style="display:flex;flex-wrap:wrap;gap:4mm">'
+        grid = ('<div style="display:flex;flex-wrap:wrap;gap:3mm;'
+                'justify-content:flex-start">'
                 + "".join(rider_sticker(nm) for nm in print_sel) + "</div>")
         doc = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>{PRINT_CSS}</style></head><body>
 <button class="printbtn" onclick="window.print()">🖨️ Imprimer</button>
+<div style="width:210mm;margin:0 auto">
 <div style="display:flex;align-items:center;gap:16px;background:#111318;color:#fff;border-radius:10px;padding:14px 20px;margin-bottom:10px">
 {logo_html}<div><div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;opacity:.6">Séance du jour · Stem Values</div>
 <div style="font-size:22px;font-weight:900;letter-spacing:1px">{_esc(camp or "Séance")}</div>
 <div style="font-size:12px;opacity:.8">{_esc(day)} · {_esc(sdate.strftime("%d/%m/%Y"))} · {len(print_sel)} coureur(s) · découpe le long des pointillés</div></div>
 <div style="margin-left:auto;text-align:center;background:rgba(255,255,255,.12);border-radius:8px;padding:6px 16px"><span>Total</span><b style="font-size:20px;display:block">{total_min:.0f}'</b></div></div>
-{grid}</body></html>"""
+{grid}</div></body></html>"""
         components.html(doc, height=1000, scrolling=True)
 
 st.caption("Zones ancrées sur la CP de chaque coureur. Aucune donnée ne quitte l'application.")
