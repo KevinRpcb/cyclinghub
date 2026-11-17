@@ -1,3 +1,5 @@
+import base64
+import html as _html
 from datetime import date
 
 import numpy as np
@@ -10,7 +12,7 @@ from core.auth import gate
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
 from core.riders import parse_riders_csv, cached_csv, store_csv
-from core.powermodel import fit_cp_model, rho_air, wprime_balance
+from core.powermodel import fit_cp_model, rho_air
 from core.course import parse_course, build_segments, fetch_weather, simulate
 from core.fitexport import workout_from_parts
 
@@ -358,6 +360,9 @@ def _pacing_svg(parts, segs, total_km, power_curve=None):
 
 def _print_doc(parts, segs, total_km, dplus, race, stage, date_str, logo_uri,
                total_time_str, avg_w, wind_lbl, power_curve=None, rider_name=""):
+    race = _html.escape(str(race or ""))
+    stage = _html.escape(str(stage or ""))
+    rider_name = _html.escape(str(rider_name or ""))
     rows = "".join(
         f"<tr><td><b>P{p['n']}</b></td><td>{p['km_start']:.0f}–{p['km_end']:.0f} km</td>"
         f"<td>{p['dist_km']:.1f} km</td><td><b>{p['watts']} W</b></td>"

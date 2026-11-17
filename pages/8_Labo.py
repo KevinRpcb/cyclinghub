@@ -125,12 +125,13 @@ with tab3:
     with st.expander("⚙️ Sujets surveillés (requêtes PubMed)"):
         new_q = st.text_input("Ajouter un sujet (requête anglaise)", key="watch_add")
         if st.button("➕ Ajouter au fil") and new_q.strip():
-            st.session_state["watch_queries"].append(new_q.strip())
+            if new_q.strip() not in st.session_state["watch_queries"]:
+                st.session_state["watch_queries"].append(new_q.strip())
             st.rerun()
         for i, sq in enumerate(list(queries)):
             c1, c2 = st.columns([10, 1])
             c1.text(f"• {sq}")
-            if c2.button("✖", key=f"watch_del_{i}"):
+            if c2.button("✖", key=f"watch_del_{abs(hash(sq)) % 10 ** 8}"):
                 st.session_state["watch_queries"].pop(i)
                 st.rerun()
     wb1, wb2 = st.columns(2)

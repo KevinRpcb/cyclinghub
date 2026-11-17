@@ -125,11 +125,9 @@ with t_sim:
         st.markdown("**Le même ordre, testé dans tous les sens :**")
         if st.button("🔎 Calculer le meilleur ordre"):
             with st.spinner("Recherche du meilleur ordre…"):
-                bo = best_order(segs, team, sim and st.session_state["ttt_params"][0],
-                                st.session_state["ttt_params"][1],
-                                st.session_state["ttt_params"][2],
-                                st.session_state["ttt_params"][3],
-                                st.session_state["ttt_params"][4], 0.0, 0.0)
+                _pp = st.session_state["ttt_params"]
+                bo = best_order(segs, team, pull_s=_pp[0], gap=_pp[1], rho=_pp[2],
+                                wind_ms=_pp[3], wind_dir=_pp[4])
             st.session_state["ttt_bo"] = bo
         bo = st.session_state.get("ttt_bo")
         if bo:
