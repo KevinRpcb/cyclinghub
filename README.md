@@ -27,7 +27,7 @@ pages/
   5_Mode_TTT.py           Simulateur TTT, ordre de relais, analyse post-course
   6_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
   7_Stem_Values.py        Constructeur de séances : watts par coureur, print à la carte, .fit
-  8_Testing.py            Tests lactate (paliers, SV1 3×15'), test de terrain, collecte
+  8_Testing.py            Tests lactate (paliers, SV1 3×15'), test de terrain, test 5′/20′ CP
   9_Labo.py               Veille PubMed multi-IA, brainstorming, propositions
   10_Rapport_Equipe.py    Rapport d'équipe : fiches, PPR, fatigue, PDF
 ```

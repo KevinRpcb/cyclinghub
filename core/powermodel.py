@@ -180,3 +180,44 @@ def wprime_balance(powers: list, times: list, cp: float, wprime: float) -> list:
         bal = max(0.0, min(wprime, bal))
         out.append(bal)
     return out
+
+
+def cp_from_5_20(p5, p20):
+    """CP et W' déduits de deux efforts maximaux (5' et 20'), modèle CP à 2 points.
+
+    P = CP + W'/t : P5 = CP + W'/300 et P20 = CP + W'/1200, d'où
+    W' = 400 × (P5 − P20) et CP = P20 − W'/1200.
+    Retourne {"cp", "wprime", "p20"} ou None si incohérent (5' ≤ 20', valeurs
+    non numériques ou CP absurde).
+    """
+    try:
+        p5, p20 = float(p5), float(p20)
+    except (TypeError, ValueError):
+        return None
+    if not (np.isfinite(p5) and np.isfinite(p20)) or p5 <= 0 or p20 <= 0:
+        return None
+    if p5 <= p20:
+        return None
+    wprime = 400.0 * (p5 - p20)
+    cp = p20 - wprime / 1200.0
+    if not (50 < cp < 800):
+        return None
+    return {"cp": cp, "wprime": wprime, "p20": p20}
+
+
+CP_ZONE_PCTS = [("Z1 · Récupération", None, 0.55),
+                ("Z2 · Endurance", 0.55, 0.75),
+                ("Z3 · Tempo", 0.75, 0.90),
+                ("Z4 · Seuil", 0.90, 1.05),
+                ("Z5 · VO2max", 1.05, 1.20),
+                ("Z6 · Anaérobie", 1.20, None)]
+
+
+def cp_zone_table(cp):
+    """6 zones classiques en % CP : [(label, bas, haut)] (haut None = ouvert)."""
+    if not cp or cp <= 0:
+        return None
+    return [(label,
+             lo * cp if lo is not None else None,
+             hi * cp if hi is not None else None)
+            for label, lo, hi in CP_ZONE_PCTS]

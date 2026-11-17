@@ -11,6 +11,7 @@ from core.tp import TPClient, session_client
 from core.riders import parse_riders_csv, cached_csv, store_csv
 from core.lactate import (SV1_METHODS, baseline_lactate, clean_steps, sv1,
                           sv1_block_verdict, sv1_trend, sv2, zone_table)
+from core.powermodel import CP_ZONE_PCTS, cp_from_5_20, cp_zone_table
 
 st.set_page_config(page_title="Testing — WT Performance Hub", page_icon="🧪", layout="wide")
 gate()
@@ -139,7 +140,9 @@ def analyze_rider(n, steps, method, force=None):
             "base_la": baseline_lactate(steps), "weight": weight_of(n)}
 
 
-t_lac, t_sv1, t_field = st.tabs(["🩸 Test lactate (paliers)", "🎯 Test SV1 — 3×15'", "🏁 Test de terrain — collecte"])
+t_lac, t_sv1, t_field, t_cp = st.tabs(
+    ["🩸 Test lactate (paliers)", "🎯 Test SV1 — 3×15'",
+     "🏁 Test de terrain — collecte", "⏱️ Test 5′ & 20′ — CP"])
 
 # ═════════════════════════ TEST LACTATE PAR PALIERS ═════════════════════════
 with t_lac:
@@ -677,3 +680,176 @@ with t_field:
                            exp_rows.to_csv(index=False, sep=";", decimal=",")
                            .encode("utf-8-sig"),
                            "collecte_test_terrain.csv", "text/csv")
+
+
+# ═══════════════════════════════ TEST 5' & 20' — CP ═══════════════════════════════
+with t_cp:
+    st.subheader("Test 5′ & 20′ à bloc — CP et zones d'entraînement")
+    st.caption(
+        "Une ligne par coureur : deux efforts maximaux, 5 min puis 20 min (récupération "
+        "complète entre les deux). CP et W′ sont déduits du modèle puissance-critique à "
+        "2 points (W′ = 400 × (P5′ − P20′), CP = P20′ − W′/1200) et les 6 zones "
+        "d'entraînement en découlent. Sans 5′ : CP estimée par la règle 95 % × P20′. "
+        "🔴 = données à vérifier.")
+
+    CP_COLS = ["Nom", "Groupe", "P 5′ (W)", "FC moy. 5′ (bpm)", "P 20′ (W)",
+               "FC moy. 20′ (bpm)", "Poids (kg)"]
+    cp_key = "cp_collect"
+    if not isinstance(st.session_state.get(cp_key), pd.DataFrame) or \
+            st.session_state[cp_key].empty:
+        st.session_state[cp_key] = pd.DataFrame(
+            [{"Nom": "", "Groupe": GROUPS[0], "P 5′ (W)": None,
+              "FC moy. 5′ (bpm)": None, "P 20′ (W)": None,
+              "FC moy. 20′ (bpm)": None, "Poids (kg)": None}])
+    try:
+        cdf = st.data_editor(
+            st.session_state[cp_key].reindex(columns=CP_COLS), key="cp_ed",
+            hide_index=True, use_container_width=True, num_rows="dynamic",
+            column_config={
+                "Nom": st.column_config.TextColumn("Nom", required=True),
+                "Groupe": st.column_config.SelectboxColumn("Groupe", options=GROUPS,
+                                                           required=True),
+                "P 5′ (W)": st.column_config.NumberColumn("P 5′ (W)", min_value=100,
+                                                          max_value=1200, step=1),
+                "FC moy. 5′ (bpm)": st.column_config.NumberColumn(
+                    "FC moy. 5′ (bpm)", min_value=80, max_value=230, step=1),
+                "P 20′ (W)": st.column_config.NumberColumn("P 20′ (W)", min_value=100,
+                                                           max_value=1200, step=1),
+                "FC moy. 20′ (bpm)": st.column_config.NumberColumn(
+                    "FC moy. 20′ (bpm)", min_value=80, max_value=230, step=1),
+                "Poids (kg)": st.column_config.NumberColumn("Poids (kg)",
+                                                            min_value=30.0,
+                                                            max_value=120.0, step=0.5),
+            })
+    except Exception:
+        st.session_state[cp_key] = pd.DataFrame([{c: None for c in CP_COLS}])
+        st.warning("Tableau réinitialisé (état incompatible détecté).")
+        st.rerun()
+    st.session_state[cp_key] = cdf
+
+    def cp_computed(df):
+        rows = []
+        raw = df.to_dict("records")
+        for r in raw:
+            nom = str(r.get("Nom") or "").strip()
+            if not nom or nom.lower() == "nan":
+                continue
+            p5 = _num(r.get("P 5′ (W)"))
+            p20 = _num(r.get("P 20′ (W)"))
+            fc5 = _num(r.get("FC moy. 5′ (bpm)"))
+            fc20 = _num(r.get("FC moy. 20′ (bpm)"))
+            kg = _num(r.get("Poids (kg)"))
+            grp = str(r.get("Groupe") or "—")
+            m = cp_from_5_20(p5, p20) if (p5 and p20) else None
+            flags = []
+            if p5 and p20 and not m:
+                flags.append("5′ ≤ 20′ — à vérifier")
+            if m:
+                cp, wp, est = m["cp"], m["wprime"], False
+                if not (8000 <= wp <= 40000):
+                    flags.append("W′ inhabituel")
+            elif p20:
+                cp, wp, est = 0.95 * p20, None, True
+                flags.append("CP estimée 95 % (5′ manquant)")
+            else:
+                cp = wp = None
+                est = False
+            if cp and not (200 <= cp <= 650):
+                flags.append("CP inhabituelle")
+            cp_wkg = (cp / kg) if (cp and kg) else None
+            if cp and not kg:
+                flags.append("poids manquant")
+            grp_vals = []
+            for x in raw:
+                if str(x.get("Groupe") or "—") != grp or \
+                        not str(x.get("Nom") or "").strip():
+                    continue
+                xm = cp_from_5_20(_num(x.get("P 5′ (W)")), _num(x.get("P 20′ (W)"))) \
+                    if (_num(x.get("P 5′ (W)")) and _num(x.get("P 20′ (W)"))) else None
+                xcp = xm["cp"] if xm else (
+                    0.95 * _num(x.get("P 20′ (W)")) if _num(x.get("P 20′ (W)")) else None)
+                xkg = _num(x.get("Poids (kg)"))
+                if xcp and xkg:
+                    grp_vals.append(xcp / xkg)
+            if cp_wkg and len(grp_vals) >= 3:
+                arr = np.array(grp_vals, dtype=float)
+                sd = float(arr.std())
+                if sd > 0 and abs(cp_wkg - float(arr.mean())) > 2 * sd:
+                    flags.append("CP W/kg atypique vs groupe")
+            rows.append({
+                "Nom": nom, "Groupe": grp,
+                "P 5′ (W)": p5, "FC moy. 5′ (bpm)": fc5,
+                "P 20′ (W)": p20, "FC moy. 20′ (bpm)": fc20,
+                "Poids (kg)": kg,
+                "CP (W)": round(cp) if cp else None,
+                "W′ (kJ)": round(wp / 1000.0, 1) if wp else None,
+                "CP (W/kg)": round(cp_wkg, 2) if cp_wkg else None,
+                "FC seuil ≈ FC 20′": fc20,
+                "⚠️ Suspect": " · ".join(flags),
+                "_niveau": "rouge" if ("à vérifier" in " · ".join(flags) or
+                                       "inhabituelle" in " · ".join(flags) or
+                                       "atypique" in " · ".join(flags))
+                else ("orange" if flags else "")})
+        return pd.DataFrame(rows)
+
+    cdisp = cp_computed(cdf)
+    if cdisp.empty:
+        st.info("Ajoute une ligne (au moins un Nom + P 20′) — CP, W′, W/kg et zones se "
+                "calculent automatiquement.")
+    else:
+        def _paint_cp(row):
+            color = ("#fee2e2" if row["_niveau"] == "rouge"
+                     else "#fef3c7" if row["_niveau"] else "")
+            return [f"background-color:{color}"] * len(row) if color else [""] * len(row)
+
+        st.dataframe(cdisp.style.apply(_paint_cp, axis=1).hide(axis="index"),
+                     use_container_width=True)
+
+        st.subheader("Zones d'entraînement par coureur")
+        for _, row in cdisp.iterrows():
+            cp = _num(row["CP (W)"])
+            if not cp:
+                continue
+            fc20 = _num(row["FC seuil ≈ FC 20′"])
+            with st.expander(f"{row['Nom']} — {row['Groupe']} · CP {cp:.0f} W"
+                             + (f" ({row['CP (W/kg)']:.2f} W/kg)"
+                                if row["CP (W/kg)"] else "")):
+                zrows = []
+                for (lbl, lo_pct, hi_pct), (_, lo, hi) in zip(
+                        CP_ZONE_PCTS, cp_zone_table(cp)):
+                    zrows.append({
+                        "Zone": lbl,
+                        "Bas (W)": round(lo) if lo else "—",
+                        "Haut (W)": round(hi) if hi else "ouvert",
+                        "Bas (bpm)": round(lo_pct * fc20) if (lo_pct and fc20) else "—",
+                        "Haut (bpm)": round(hi_pct * fc20) if (hi_pct and fc20) else
+                        ("ouvert" if hi_pct is None and fc20 else "—")})
+                st.dataframe(pd.DataFrame(zrows), hide_index=True,
+                             use_container_width=True)
+                if fc20:
+                    st.caption("Zones FC en % de la FC au seuil (≈ FC moy. 20′) — "
+                               "ajuste si tu connais la FCmax du coureur.")
+
+        st.subheader("CP (W/kg) par coureur")
+        bar_df = cdisp[cdisp["CP (W/kg)"].notna()].sort_values(
+            "CP (W/kg)", ascending=False)
+        if not bar_df.empty:
+            GROUP_COLORS = {"WT Hommes": "#dc2626", "WT Femmes": "#db2777",
+                            "Conti Hommes": "#2563eb", "Conti Femmes": "#16a34a"}
+            fig = go.Figure()
+            for g in sorted(bar_df["Groupe"].unique()):
+                sub = bar_df[bar_df["Groupe"] == g]
+                fig.add_trace(go.Bar(x=sub["Nom"], y=sub["CP (W/kg)"], name=g,
+                                     marker_color=GROUP_COLORS.get(g, "#64748b")))
+            fig.update_layout(template="plotly_white", barmode="group", height=340,
+                              yaxis_title="CP (W/kg)",
+                              legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                          xanchor="right", x=1))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Renseigne la puissance 20′ (et le poids) pour afficher le graphe.")
+
+        st.download_button("⬇️ Test 5′ & 20′ (CSV)",
+                           cdisp.drop(columns=["_niveau"]).to_csv(
+                               index=False, sep=";", decimal=",").encode("utf-8-sig"),
+                           "test_5_20_cp.csv", "text/csv")
