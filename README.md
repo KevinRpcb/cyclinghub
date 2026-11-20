@@ -19,17 +19,19 @@ core/
   lactate.py              Seuils SV1/SV2, zones, verdicts tests lactate
   powermodel.py           Modèle CP, SCx, vitesses, puissance normalisée
   course.py               GPX/FIT, segments, météo Open-Meteo, pacing
+  raceplan.py             Plan de course : montées, délais, kJ, glucides g/h
 pages/
   1_Fiche_Coureur.py      Page par coureur : métriques + analyse IA complète
   2_Plannif_Annuel.py     Calendrier par coureur, blocs, coach IA, sauvegarde chiffrée
   3_TT_Center.py          Suivi efforts CLM, PPR, estimation SCx, cible rapide
   4_Prevision_Perf.py     GPX/FIT → pacing + watts (type BestBikeSplit)
   5_Mode_TTT.py           Simulateur TTT, ordre de relais, analyse post-course
-  6_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
-  7_Stem_Values.py        Constructeur de séances : watts par coureur, print à la carte, .fit
-  8_Testing.py            Tests lactate (paliers, SV1 3×15'), test de terrain, test 5′/20′ CP
-  9_Labo.py               Veille PubMed multi-IA, brainstorming, propositions
-  10_Rapport_Equipe.py    Rapport d'équipe : fiches, PPR, fatigue, PDF
+  6_Prevision_Course.py   Montées + records, délais (fenêtre), kJ, glucides g/h, fiches
+  7_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
+  8_Stem_Values.py        Constructeur de séances : watts par coureur, print à la carte, .fit
+  9_Testing.py            Multi-tools : Lactate Lab, Lactate Terrain, SV1 3×15′, 5′&20′ CP
+  10_Labo.py              Veille PubMed multi-IA, brainstorming, propositions
+  11_Rapport_Equipe.py    Rapport d'équipe : fiches, PPR, fatigue, PDF
 ```
 
 ## Secrets requis (Streamlit Cloud → App → Settings → Secrets)

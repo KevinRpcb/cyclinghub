@@ -205,12 +205,46 @@ def analyze_rider(n, steps, method, force=None):
             "base_la": baseline_lactate(steps), "weight": weight_of(n)}
 
 
-t_lac, t_sv1, t_field, t_cp = st.tabs(
-    ["🩸 Test lactate (paliers)", "🎯 Test SV1 — 3×15'",
-     "🏁 Test de terrain — collecte", "⏱️ Test 5′ & 20′ — CP"])
+TOOLS = {
+    "lactate": ("🩸 Lactate Lab",
+                "Test par paliers → SV1/SV2, zones watts & FC, rapport complet",
+                "En usage"),
+    "sv1": ("🎯 SV1 — 3×15′",
+            "Zone cible en amont, lactates par bloc, analyse coureur et groupe",
+            "En usage"),
+    "field": ("🏁 Lactate Terrain",
+              "Collecte de test de terrain : puissance révisée, code couleur suspects, "
+              "W/kg vs durée",
+              "En usage"),
+    "cp": ("⏱️ 5′ & 20′ CP",
+           "Deux efforts à bloc → CP/W′ à 2 points, 6 zones d'entraînement",
+           "En usage"),
+}
+
+tool = st.session_state.get("test_tool", "")
+if tool and tool in TOOLS:
+    bcol = st.columns([1, 5])
+    if bcol[0].button("← Tous les outils"):
+        st.session_state["test_tool"] = ""
+        st.rerun()
+    st.subheader(TOOLS[tool][0])
+else:
+    st.subheader("🧰 Multi-tools Testing")
+    st.caption("Outils prêts à l'emploi — clique sur Ouvrir.")
+    items = list(TOOLS.items())
+    for r in range(0, len(items), 2):
+        cols = st.columns(2)
+        for col, (key, (title, desc_v, badge)) in zip(cols, items[r:r + 2]):
+            with col.container(border=True):
+                st.markdown(f"**{title}**  \n🟢 {badge}")
+                st.caption(desc_v)
+                if st.button("Ouvrir", key=f"test_open_{key}",
+                             use_container_width=True):
+                    st.session_state["test_tool"] = key
+                    st.rerun()
 
 # ═════════════════════════ TEST LACTATE PAR PALIERS ═════════════════════════
-with t_lac:
+if tool == "lactate":
     st.subheader("Test par paliers — saisie")
     st.caption("Un palier par ligne : puissance tenue, FC moyenne, lactate capillaire. "
                "Laisse vide ce qui n'a pas été mesuré.")
@@ -446,7 +480,7 @@ with t_lac:
                             "testing_paliers_bruts.csv", "text/csv")
 
 # ═════════════════════════ TEST SV1 — 3 × 15' ═════════════════════════
-with t_sv1:
+elif tool == "sv1":
     st.subheader("1 · Zone cible en amont")
     st.caption("3 × 15' calés entre SV1 et SV2 : FC entre SV1+2 bpm et SV2−10 bpm, "
                "puissance entre P@SV1 et la moitié SV1→SV2. Sans test lactate saisi : "
@@ -594,7 +628,7 @@ with t_sv1:
 
 
 # ═══════════════════════════════ TEST DE TERRAIN — COLLECTE ═══════════════════════════════
-with t_field:
+elif tool == "field":
     st.subheader("Collecte test de terrain")
     st.caption(
         "Une ligne par coureur et par test. Puissance et FC saisies = **moyennes sur la montée**. La **puissance révisée** applique la formule de "
@@ -783,7 +817,7 @@ with t_field:
 
 
 # ═══════════════════════════════ TEST 5' & 20' — CP ═══════════════════════════════
-with t_cp:
+elif tool == "cp":
     st.subheader("Test 5′ & 20′ à bloc — CP et zones d'entraînement")
     st.caption(
         "Une ligne par coureur : deux efforts maximaux, 5 min puis 20 min (récupération "
