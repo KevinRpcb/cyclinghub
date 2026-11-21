@@ -119,12 +119,15 @@ class StravaClient:
             "bounds": f"{south},{west},{north},{east}"})
         return out.get("segments", [])
 
-    def leaderboard_kom(self, segment_id: int):
+    def leaderboard_kom(self, segment_id: int, sex: str = None):
         """(secondes, nom de l'athlète, date ISO) du record du segment,
-        ou None si pas de classement accessible."""
+        ou None si pas de classement accessible. sex = "M" ou "F" filtre
+        le classement par genre (équipe hommes + femmes)."""
         try:
-            lb = self._get(f"segments/{segment_id}/leaderboard",
-                           {"per_page": 1})
+            params = {"per_page": 1}
+            if sex in ("M", "F"):
+                params["gender"] = sex
+            lb = self._get(f"segments/{segment_id}/leaderboard", params)
         except StravaError:
             return None
         entries = lb.get("entries", [])
@@ -228,7 +231,8 @@ def collect_segments(points, client: StravaClient, corridor_m: float = 800.0,
 
 # ── Appariement segments ↔ montées détectées ────────────────────────────
 def match_climbs(segments, climbs):
-    """Pour chaque montée détectée, les segments candidats qui la recouvrent.
+    """Pour chaque montée détectée, les segments candidats qui la recouvrent
+    (≥25 % de la montée, ou ≥60 % du segment inclus dans la montée).
 
     climbs : [(start_km, len_km, grad_pct)] ; segments : sortie collect_segments.
     Retourne {i_montée: [segment, ...]} trié par recouvrement décroissant."""
@@ -239,7 +243,10 @@ def match_climbs(segments, climbs):
         for sg in segments:
             s0, s1 = sg["km"], sg["km"] + sg["len_m"] / 1000.0
             ov = min(km1, s1) - max(km0, s0)
-            if ov > 0.25 * len_km:
+            sg_km = sg["len_m"] / 1000.0
+            # Retenu si le segment couvre une bonne part de la montée, ou s'il
+            # est lui-même largement inclus dedans (souvent le cas Strava).
+            if ov > 0.25 * len_km or ov > 0.6 * sg_km:
                 cands.append((-ov, sg["dist_route_m"], sg))
         cands.sort(key=lambda t: (t[0], t[1]))
         out[i] = [c[2] for c in cands]

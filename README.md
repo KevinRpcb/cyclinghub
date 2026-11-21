@@ -21,15 +21,15 @@ core/
   course.py               GPX/FIT, segments, météo Open-Meteo, pacing
   raceplan.py             Plan de course : montées, délais, kJ, glucides g/h
   strava.py               Reco d'étape : segments Strava le long du parcours,
-                          records (KOM) automatiques, rattachement aux montées
+                          records (KOM) hommes/femmes, rattachement aux montées
 pages/
   1_Fiche_Coureur.py      Page par coureur : métriques + analyse IA complète
   2_Plannif_Annuel.py     Calendrier par coureur, blocs, coach IA, sauvegarde chiffrée
   3_TT_Center.py          Suivi efforts CLM, PPR, estimation SCx, cible rapide
   4_Prevision_Perf.py     GPX/FIT → pacing + watts (type BestBikeSplit)
   5_Mode_TTT.py           Simulateur TTT, ordre de relais, analyse post-course
-  6_Prevision_Course.py   Montées + records (Strava auto ou main), délais (fenêtre),
-                          kJ, glucides g/h, fiches + reco segments de l'étape
+  6_Prevision_Course.py   Montées + records (Strava auto ou main), temps gagnant
+                          et délai %, kJ, glucides g/h, fiches + reco segments
   7_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
   8_Stem_Values.py        Constructeur de séances : watts par coureur, print à la carte, .fit
   9_Testing.py            Multi-tools : Lactate Lab, Lactate Terrain (paliers rampés),
