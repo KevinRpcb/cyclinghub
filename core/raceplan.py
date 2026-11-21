@@ -1,5 +1,5 @@
-"""Plan de course : montées principales, temps par rôle, délai (fenêtre de
-contrôle), énergie (kJ) et glucides (g/h).
+"""Plan de course : montées principales, temps par rôle, délai (temps gagnant
++ % choisi par le coach → temps du délai), énergie (kJ) et glucides (g/h).
 
 Modèle volontairement simple et transparent :
 - montées détectées sur les segments (pente moyenne et longueur minimales) ;

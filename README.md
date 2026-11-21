@@ -28,8 +28,8 @@ pages/
   3_TT_Center.py          Suivi efforts CLM, PPR, estimation SCx, cible rapide
   4_Prevision_Perf.py     GPX/FIT → pacing + watts (type BestBikeSplit)
   5_Mode_TTT.py           Simulateur TTT, ordre de relais, analyse post-course
-  6_Prevision_Course.py   Montées + records (Strava auto ou main), délais (fenêtre),
-                          kJ, glucides g/h, fiches + reco segments de l'étape
+  6_Prevision_Course.py   Montées + records (Strava auto ou main), temps gagnant
+                          et délai %, kJ, glucides g/h, fiches + reco segments
   7_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
   8_Stem_Values.py        Constructeur de séances : watts par coureur, print à la carte, .fit
   9_Testing.py            Multi-tools : Lactate Lab, Lactate Terrain (paliers rampés),

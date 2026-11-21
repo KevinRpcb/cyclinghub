@@ -15,7 +15,9 @@ from core.tp import TPClient, session_client
 from core.riders import parse_riders_csv, cached_csv, store_csv
 from core.powermodel import fit_cp_model, rho_air
 from core.course import parse_course, build_segments
-from core.raceplan import ROLES, cho_grams_per_hour, detect_climbs, hydratation_l_per_h, power_for_time, race_plan
+from core.raceplan import (ROLES, cho_grams_per_hour, climb_effort_max,
+                           climb_time_at_power, detect_climbs,
+                           hydratation_l_per_h, power_for_time, race_plan)
 
 st.set_page_config(page_title="Prévision Course — WT Performance Hub",
                    page_icon="🏁", layout="wide")
@@ -132,11 +134,32 @@ riders = st.session_state.get("race_riders") or []
 for level, msg in st.session_state.get("race_note", []):
     getattr(st.sidebar, level)(msg)
 
+rider_by = {str(r.get("name")): r for r in riders}
+
+
+def _model_of(n):
+    """CP/W′ d'un coureur + source : profil de puissance (modèle 1-20 min),
+    CP de la plateforme (Vekta/TP/CSV), ou valeur par défaut à corriger."""
+    r = rider_by.get(n, {})
+    pts = [(s, r[k]) for k, s in [("p1m", 60), ("p3m", 180), ("p5m", 300),
+                                  ("p10m", 600), ("p20m", 1200)] if r.get(k)]
+    m = fit_cp_model(pts) if len(pts) >= 2 else None
+    if m:
+        src = "Profil 1–20 min (modèle)"
+    elif r.get("cp"):
+        src = "CP plateforme"
+    else:
+        src = "Défaut — à saisir"
+    cp = m["cp"] if m else (float(r.get("cp") or 320))
+    return cp, (m["wprime"] / 1000.0 if m else 21.0), src
+
+
 st.title("🏁 Prévision Course")
 st.caption("Montées détectées du fichier (.gpx/.fit), records Strava (auto ou "
            "saisis à la main), temps par rôle : leaders à bloc, coéquipiers et "
-           "sprinters gèrent pour rester dans les délais. Durée, délai (fenêtre de "
-           "contrôle), kJ et glucides g/h. Fiche par coureur + document global.")
+           "sprinters gèrent pour rester dans les délais. Durée, temps gagnant, "
+           "délai en %, temps du délai, kJ et glucides g/h. Fiche par coureur + "
+           "document global.")
 
 with st.expander("➕ Ajouter des coureurs manuellement (hors plateforme)"):
     new_names = st.text_area("Un nom par ligne", key="race_manual_input", height=70,
@@ -217,7 +240,60 @@ for _, c in st.session_state["race_climb_rows"].iterrows():
 fig.update_layout(template="plotly_white", height=260,
                   xaxis_title="km", yaxis_title="Élévation (m)",
                   margin=dict(l=0, r=0, t=10, b=0))
-st.plotly_chart(fig, use_container_width=True)
+ev = st.plotly_chart(fig, use_container_width=True, on_select="rerun",
+                     selection_mode=("box", "lasso"), key="race_profile")
+
+
+def _zone_stats(km0, km1):
+    """Distance, %, D+ de la zone [km0, km1] du profil."""
+    if km1 <= km0:
+        return None
+    z = segs[(segs["start_km"] + 1e-9 >= km0) & (segs["start_km"] - 1e-9 <= km1)]
+    dist_km = float(km1 - km0)
+    if z.empty:
+        return None
+    up_m = float(np.clip(z["gradient_pct"], 0, None).mul(z["dist_m"]).sum())
+    up_rows = z[z["gradient_pct"] >= 1.0]
+    up_km = float(up_rows["dist_m"].sum() / 1000.0) if len(up_rows) else 0.0
+    up_grad = (float(np.average(up_rows["gradient_pct"], weights=up_rows["dist_m"]))
+               if len(up_rows) else 0.0)
+    return {"dist_km": dist_km, "pct_moy": 100.0 * (up_m / 1000.0) / dist_km,
+            "dplus": up_m / 1000.0, "up_grad": up_grad, "up_km": up_km}
+
+
+_sel = getattr(getattr(ev, "selection", None), "points", None) or []
+if not _sel and isinstance(ev, dict):
+    _sel = (ev.get("selection") or {}).get("points") or []
+_zxs = sorted(float(p["x"]) for p in _sel if p.get("x") is not None)
+if len(_zxs) >= 2 and _zxs[-1] - _zxs[0] >= 0.1:
+    _zs = _zone_stats(_zxs[0], _zxs[-1])
+    if _zs:
+        _zn = [str(r.get("name")) for r in riders]
+        _zrider = st.selectbox("Coureur de référence pour le temps de la zone",
+                               _zn, key="race_zoom_rider")
+        _cpz, _wpz, _ = _model_of(_zrider)
+        _r0 = rider_by.get(_zrider, {})
+        _massz = float(_r0.get("weight") or 70) + BIKE_KG
+        if _zs["up_grad"] >= 2.0:
+            _tz, _pz = climb_effort_max(_zs["up_grad"], _zs["up_km"] * 1000.0,
+                                        _cpz, _wpz * 1000.0, _massz, 0.22, 1.225)
+            _ztxt = (f"temps record ~{_hms(_tz)} à ~{_pz:.0f} W "
+                     f"(pente montée {_zs['up_grad']:.1f} %, {_zs['up_km']:.2f} km)")
+        else:
+            _tz = climb_time_at_power(max(_zs["pct_moy"], -3.0),
+                                      _zs["dist_km"] * 1000.0, _cpz * 0.55,
+                                      _massz, 0.22, 1.225)
+            _ztxt = f"temps gestion ~{_hms(_tz)} (plateau/roulant)"
+        z1, z2, z3, z4 = st.columns(4)
+        z1.metric("Zone zoomée", f"{_zs['dist_km']:.2f} km",
+                  help="Distance de la zone sélectionnée sur le profil.")
+        z2.metric("% moyen", f"{_zs['pct_moy']:.1f} %")
+        z3.metric("D+ zone", f"{_zs['dplus']:.0f} m")
+        z4.metric("Temps de la zone", _ztxt.split("~")[1].split(" ")[0]
+                  if "~" in _ztxt else "—", help=_ztxt)
+        st.caption(f"Zone {_zxs[0]:.1f} → {_zxs[-1]:.1f} km · {_ztxt}")
+st.caption("💡 Zoom ou sélection rectangle/lasso sur le profil : distance, % moyen, "
+           "D+ et temps de la zone sélectionnée.")
 
 # ── 2 · Montées & records ──────────────────────────────────────────────────────
 st.subheader("2 · Montées principales & records")
@@ -367,9 +443,44 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                 _sv["segments"],
                 [(float(r["km"]), float(r["Longueur (km)"]),
                   float(r["Pente (%)"])) for _, r in _srows])
+            _nb_c = sum(1 for _j in range(len(_srows)) if _matches.get(_j))
+            if not _nb_c:
+                st.info("Aucun segment trouvé dans le corridor des montées "
+                        "détectées (Strava ne couvre pas toujours tout le "
+                        "parcours) — saisis les records à la main dans le "
+                        "tableau 2, ou relance le scan.")
+            if _nb_c and st.button("✨ Remplir tous les records automatiquement",
+                                   key="race_strava_fill_all",
+                                   help="Pour chaque montée : prend la meilleure "
+                                        "candidate détectée et relève son KOM."):
+                try:
+                    _cl = strava_api.StravaClient(**strava_api.credentials())
+                    _df = st.session_state["race_climb_rows"].copy()
+                    _kk = dict(st.session_state.get("race_strava_kom", {}) or {})
+                    _n = 0
+                    for _j, (_ridx, _r) in enumerate(_srows):
+                        _cands = _matches.get(_j, [])
+                        if not _cands:
+                            continue
+                        _sg = _cands[0]
+                        _rec = _cl.leaderboard_kom(_sg["id"])
+                        if _rec and _rec.get("time_s"):
+                            _df.loc[_ridx, "Nom / Strava"] = _sg["name"]
+                            _df.loc[_ridx, "Record"] = _fmt_rec(_rec["time_s"])
+                            _kk[_sg["id"]] = _rec
+                            _n += 1
+                    st.session_state["race_strava_kom"] = _kk
+                    st.session_state["race_climb_rows"] = _df
+                    st.session_state["race_climb_ver"] = \
+                        st.session_state.get("race_climb_ver", 0) + 1
+                    st.session_state["race_strava_ok"] = _n
+                    st.rerun()
+                except strava_api.StravaError as e:
+                    st.error(f"{e}")
             _picks = {}
-            st.markdown("**Rattacher un segment à une montée** — le record se "
-                        "remplit tout seul après validation.")
+            st.markdown("**Rattacher un segment à une montée** — la meilleure "
+                        "candidate est présélectionnée ; ajuste si besoin, puis "
+                        "valide avec le bouton plus bas.")
             for _j, (_ridx, _r) in enumerate(_srows):
                 _cands = _matches.get(_j, [])[:8]
                 if not _cands:
@@ -385,7 +496,7 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                 _pick = st.selectbox(
                     f'{_r["km"]:.1f} km · {_r["Longueur (km)"]:.2f} km @ '
                     f'{_r["Pente (%)"]:.1f} %',
-                    _lbls, key=f"race_strava_pick_{_ridx}")
+                    _lbls, key=f"race_strava_pick_{_ridx}", index=1)
                 if _pick != "—":
                     _picks[_ridx] = _cands[_lbls.index(_pick) - 1]
             if _picks and st.button("📌 Relever le record Strava pour ces montées",
@@ -425,28 +536,20 @@ if not team_sel:
     st.info("Sélectionne au moins un coureur.")
     st.stop()
 
-rider_by = {str(r.get("name")): r for r in riders}
 roles_saved = st.session_state.get("race_roles", {})
-
-
-def _model_of(n):
-    r = rider_by.get(n, {})
-    pts = [(s, r[k]) for k, s in [("p1m", 60), ("p3m", 180), ("p5m", 300),
-                                  ("p10m", 600), ("p20m", 1200)] if r.get(k)]
-    m = fit_cp_model(pts) if len(pts) >= 2 else None
-    cp = m["cp"] if m else (float(r.get("cp") or 320))
-    return cp, (m["wprime"] / 1000.0 if m else 21.0)
 
 
 role_rows = []
 for n in team_sel:
     r = rider_by.get(n, {})
-    cp, wp = _model_of(n)
+    cp, wp, csrc = _model_of(n)
     saved_r = roles_saved.get(n, {})
     role_rows.append({"Coureur": n,
                       "Rôle": saved_r.get("role", "Coéquipier"),
                       "Poids (kg)": float(saved_r.get("kg") or r.get("weight") or 70.0),
                       "CP (W)": float(saved_r.get("cp") or cp),
+                      "Source CP": ("Saisie (enregistrée)" if saved_r.get("cp")
+                                    else csrc),
                       "W′ (kJ)": float(saved_r.get("wp") or round(wp))})
 try:
     with st.form("role_form", clear_on_submit=False):
@@ -462,6 +565,12 @@ try:
                                                             max_value=110.0, step=0.5),
                 "CP (W)": st.column_config.NumberColumn("CP (W)", min_value=150,
                                                         max_value=700, step=5),
+                "Source CP": st.column_config.TextColumn(
+                    "Source CP", disabled=True,
+                    help="D'où vient la CP affichée : modèle sur le profil de "
+                         "puissance (meilleurs efforts 1–20 min), CP de la "
+                         "plateforme (Vekta/TP/CSV), saisie enregistrée, ou "
+                         "défaut (à corriger!)."),
                 "W′ (kJ)": st.column_config.NumberColumn("W′ (kJ)", min_value=4.0,
                                                          max_value=40.0, step=0.5),
             })
@@ -474,6 +583,15 @@ if save_roles:
         str(r["Coureur"]): {"role": r["Rôle"], "kg": r["Poids (kg)"],
                             "cp": r["CP (W)"], "wp": r["W′ (kJ)"]}
         for _, r in rodf.iterrows() if str(r["Coureur"]).strip()}
+_def_cp = [str(r["Coureur"]) for _, r in rodf.iterrows()
+           if "Défaut" in str(r.get("Source CP", ""))]
+if _def_cp:
+    st.warning("⚠️ CP par défaut utilisée pour : " + ", ".join(_def_cp) +
+               " — c'est la source des watts trop bas ou identiques. Corrige la "
+               "colonne « CP (W) » ci-dessus puis « Enregistrer l'équipe ». Le "
+               "repère normal : le profil de puissance du coureur (meilleurs "
+               "efforts 1–20 min) ou sa CP dans la plateforme ; sinon la valeur "
+               "de repli est 320 W.")
 
 # ── 4 · Paramètres de course ──────────────────────────────────────────────────
 st.subheader("4 · Paramètres de course")
@@ -482,10 +600,11 @@ scenario = p1.radio("Scénario", ["Rapide", "Normal", "Lent"], horizontal=True,
                     key="race_scen",
                     help="Vitesse du peloton sur le roulant : change les temps, "
                          "l'énergie et les glucides.")
-delai = p2.number_input("Délai / fenêtre (%, du temps gagnant)", 5, 40, 20, 1,
+delai = p2.number_input("Délai (%, du temps gagnant)", 5, 40, 20, 1,
                         key="race_delai",
                         help="Le % que tu remplis selon la course (règlement / "
-                             "expérience). Fenêtre = temps gagnant × (1 + %).")
+                             "expérience). Temps du délai = temps gagnant × "
+                             "(1 + %).")
 winner_txt = p3.text_input("Temps gagnant à toi de fixer (h:mm:ss) — optionnel",
                            key="race_winner", placeholder="ex : 4:45:00",
                            help="Si tu remplis, il remplace le temps gagnant estimé.")
@@ -557,8 +676,8 @@ if not sum_df.empty and plans:
 
     st.dataframe(sum_df.style.apply(_paint, axis=1).hide(axis="index"),
                  use_container_width=True)
-    st.caption(f"Temps gagnant estimé : **{_hms(winner_s)}** · fenêtre de contrôle : "
-               f"**{_hms(cut_s)}** (délai {delai:.0f} %). 🟠 marge < 5 min · "
+    st.caption(f"Temps gagnant estimé : **{_hms(winner_s)}** · délai {delai:.0f} % "
+               f"→ temps du délai **{_hms(cut_s)}**. 🟠 marge < 5 min · "
                "🔴 hors délais.")
 
 # Montées : temps & watts par coureur
@@ -611,7 +730,7 @@ def _fiche_html(n):
                  f"<td>{_esc(_hms(cd['time_s']))}</td>"
                  f"<td>{_esc(pw)} W</td></tr>")
     margin_txt = ("HORS DÉLAIS" if margin < 0
-                  else f"marge {_esc(_hms(margin))} avant la fermeture "
+                  else f"marge {_esc(_hms(margin))} sur le délai "
                        f"({_esc(_hms(cut_s))})")
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
     body{{font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#111;background:#fff;margin:24px}}
@@ -635,9 +754,9 @@ def _fiche_html(n):
     <div class="kv">{_esc(int(cho_h))} g/h de glucides → {_esc(int(cho_h * lin_h))} g au total ·
     boisson ~{_esc(f"{hyd:.1f}")} L/h · transport mixte conseillé au-delà de 2h30
     (glucose:fructose ~1:0,8)</div>
-    <h2>Délai / fenêtre de contrôle</h2>
+    <h2>Délai</h2>
     <div class="kv">Temps gagnant {_esc(_hms(winner_s))} · délai {_esc(f"{delai:.0f} %")}
-    → fenêtre ferme à {_esc(_hms(cut_s))}</div>
+    → temps du délai {_esc(_hms(cut_s))}</div>
     </body></html>"""
 
 
@@ -664,7 +783,7 @@ def _global_html():
     @media print{{body{{margin:10mm}}}}
     </style></head><body>
     <h1>🏁 {_esc(race_name)} — plan d'équipe</h1>
-    <div class="kv">{_esc(_fmt(total_km, 1))} km · D+ {_esc(_fmt(dplus))} m · scénario {_esc(scenario)} · temps gagnant {_esc(_hms(winner_s))} · fenêtre {_esc(_hms(cut_s))} (délai {_esc(f'{delai:.0f} %')})</div>
+    <div class="kv">{_esc(_fmt(total_km, 1))} km · D+ {_esc(_fmt(dplus))} m · scénario {_esc(scenario)} · temps gagnant {_esc(_hms(winner_s))} · délai {_esc(f'{delai:.0f} %')} → temps du délai {_esc(_hms(cut_s))}</div>
     <h2>Équipe</h2>
     <table><tr><th>Coureur</th><th>Rôle</th><th>Temps</th><th>Écart</th><th>Marge délai</th><th>W roulant</th><th>W moy</th><th>kJ</th><th>g/h</th><th>Gluc.</th></tr>{trs}</table>
     <h2>Montées</h2>
