@@ -8,6 +8,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from core.auth import gate
+from core import strava as strava_api
+from core.config import get_secret as _get_secret
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
 from core.riders import parse_riders_csv, cached_csv, store_csv
@@ -51,6 +53,14 @@ def _parse_rec(s):
         return float(s.replace(",", ".")) * 60.0
     except ValueError:
         return None
+
+
+def _fmt_rec(s):
+    """Secondes → « mm:ss » ou « h:mm:ss » pour remplir la colonne Record."""
+    s = int(round(float(s)))
+    if s >= 3600:
+        return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+    return f"{s // 60}:{s % 60:02d}"
 
 
 # ── Source des coureurs (même logique que Testing) ────────────────────────────
@@ -123,7 +133,7 @@ for level, msg in st.session_state.get("race_note", []):
     getattr(st.sidebar, level)(msg)
 
 st.title("🏁 Prévision Course")
-st.caption("Montées détectées du fichier (.gpx/.fit), records relevés (Strava / KOM, "
+st.caption("Montées détectées du fichier (.gpx/.fit), records Strava (auto ou "
            "saisis à la main), temps par rôle : leaders à bloc, coéquipiers et "
            "sprinters gèrent pour rester dans les délais. Durée, délai (fenêtre de "
            "contrôle), kJ et glucides g/h. Fiche par coureur + document global.")
@@ -217,7 +227,8 @@ st.caption("Les montées sont détectées automatiquement ; complète le nom (St
 try:
     with st.form("climb_form", clear_on_submit=False):
         cdf = st.data_editor(
-            st.session_state["race_climb_rows"], key="race_climbs_ed",
+            st.session_state["race_climb_rows"],
+            key=f"race_climbs_ed_{st.session_state.get('race_climb_ver', 0)}",
             hide_index=True, use_container_width=True, num_rows="dynamic",
             column_config={
                 "km": st.column_config.NumberColumn("km", disabled=True),
@@ -251,6 +262,156 @@ grad_rest = float(
     np.average(np.clip(segs["gradient_pct"], -1.5, 2.0),
                weights=segs["dist_m"])) if len(segs) else 0.0
 climb_km = sum(l for _, l, _ in climb_list)
+
+# ── 2b · Reco Strava (segments de l'étape & records automatiques) ────────────
+with st.expander("🛰️ Reco Strava — segments de l'étape & records automatiques",
+                 expanded=False):
+    if not strava_api.is_configured():
+        if strava_api.oauth_client_ready():
+            st.markdown("**Dernière étape de la connexion (une seule fois)**")
+            st.markdown(
+                "1. Ouvre l'URL ci-dessous, connecte-toi à ton compte Strava et "
+                "autorise l'app.\n"
+                "2. Tu arrives sur une page vide avec une adresse du type "
+                "`…?code=XXXXX…` — copie le code.")
+            st.markdown(f"[🔗 Autoriser l'équipe sur Strava]({strava_api.authorize_url()})")
+            _code = st.text_input("Code d'autorisation (après ?code=…)",
+                                  key="strava_code")
+            if st.button("Valider la connexion", key="strava_exchange") and _code:
+                try:
+                    _d = strava_api.exchange_code(_code.strip())
+                    st.success("Connexion validée ! Copie cette ligne dans les "
+                               "Secrets Streamlit, puis recharge la page.")
+                    st.code(f'STRAVA_REFRESH_TOKEN = "{_d.get("refresh_token", "")}"')
+                except strava_api.StravaError as e:
+                    st.error(f"{e}")
+        else:
+            st.info(
+                "Connexion Strava non configurée — 3 étapes, une seule fois :\n\n"
+                "1️⃣ Sur **strava.com/settings/api**, crée une « API Application » "
+                "(nom libre, Callback Domain : `localhost`).\n\n"
+                "2️⃣ Récupère le **Client ID** et le **Client Secret**, puis ajoute-"
+                "les aux Secrets Streamlit :\n\n"
+                '```toml\nSTRAVA_CLIENT_ID = "12ab…"\n'
+                'STRAVA_CLIENT_SECRET = "…"\n```\n\n'
+                "3️⃣ Recharge la page : un bouton d'autorisation apparaît ici pour "
+                "générer le refresh token.")
+    else:
+        _sv = st.session_state.get("race_strava")
+        if _sv and _sv.get("sig") == race_name and _sv.get("segments"):
+            st.caption(f"Scan en cache : {_sv['zones']} zones interrogées, "
+                       f"{len(_sv['segments'])} segments le long du parcours.")
+        if st.button("🛰️ Scanner les segments de l'étape", key="race_strava_scan"):
+            try:
+                _cl = strava_api.StravaClient(**strava_api.credentials())
+                _pb = st.progress(0.0, text="Recherche des segments…")
+                _segs, _nb = strava_api.collect_segments(
+                    points, _cl,
+                    progress=lambda a, b: _pb.progress(
+                        min(1.0, (a + 1) / b) * 0.9))
+                st.session_state["race_strava"] = {"sig": race_name,
+                                                   "segments": _segs,
+                                                   "zones": _nb}
+                st.session_state["race_strava_kom"] = {}
+                st.rerun()
+            except strava_api.StravaError as e:
+                st.error(f"{e}")
+
+        _sv = st.session_state.get("race_strava")
+        if _sv and _sv.get("sig") == race_name and _sv.get("segments"):
+            _kom = st.session_state.get("race_strava_kom", {}) or {}
+            if st.button("⏱️ Charger les meilleurs temps (KOM)",
+                         key="race_strava_kom_btn"):
+                try:
+                    _cl = strava_api.StravaClient(**strava_api.credentials())
+                    _kk = dict(_kom)
+                    _pbk = st.progress(0.0, text="Relevé des KOM…")
+                    _tgt = _sv["segments"][:60]
+                    for _i, _s in enumerate(_tgt):
+                        _r = _cl.leaderboard_kom(_s["id"])
+                        if _r and _r.get("time_s"):
+                            _kk[_s["id"]] = _r
+                        _pbk.progress((_i + 1) / len(_tgt))
+                    st.session_state["race_strava_kom"] = _kk
+                    st.rerun()
+                except strava_api.StravaError as e:
+                    st.error(f"{e}")
+
+            _rows = []
+            for _s in _sv["segments"]:
+                _r = _kom.get(_s["id"])
+                _rows.append({
+                    "km": _s["km"], "Nom": _s["name"],
+                    "Long. (km)": round(_s["len_m"] / 1000.0, 2),
+                    "Pente (%)": _s["avg_grade"], "D+ (m)": round(_s["dplus"]),
+                    "Record": _fmt_rec(_r["time_s"]) if _r else "—",
+                    "Vitesse rec. (km/h)": round(
+                        _s["len_m"] / _r["time_s"] * 3.6, 1)
+                    if _r and _r.get("time_s") else None})
+            _sdf = pd.DataFrame(_rows)
+            st.data_editor(_sdf, key="race_strava_ed", hide_index=True,
+                           use_container_width=True,
+                           column_config={
+                               "km": st.column_config.NumberColumn(
+                                   "km", format="%.1f", disabled=True),
+                               "Pente (%)": st.column_config.NumberColumn(
+                                   "Pente (%)", format="%.1f", disabled=True)})
+            st.download_button("📤 CSV segments de l'étape",
+                               _sdf.to_csv(index=False).encode("utf-8"),
+                               f"segments_{race_name}.csv", "text/csv",
+                               key="race_strava_csv")
+
+            # Rattachement records ↔ montées détectées
+            _srows = list(climb_rows.iterrows())
+            _matches = strava_api.match_climbs(
+                _sv["segments"],
+                [(float(r["km"]), float(r["Longueur (km)"]),
+                  float(r["Pente (%)"])) for _, r in _srows])
+            _picks = {}
+            st.markdown("**Rattacher un segment à une montée** — le record se "
+                        "remplit tout seul après validation.")
+            for _j, (_ridx, _r) in enumerate(_srows):
+                _cands = _matches.get(_j, [])[:8]
+                if not _cands:
+                    continue
+                _lbls = ["—"]
+                for _c in _cands:
+                    _rec = _kom.get(_c["id"])
+                    _lbls.append(
+                        f'{_c["name"]} ({_c["len_m"] / 1000.0:.2f} km, '
+                        f'{_c["avg_grade"]:.1f} %)'
+                        + (f' — KOM {_fmt_rec(_rec["time_s"])}'
+                           if _rec and _rec.get("time_s") else ""))
+                _pick = st.selectbox(
+                    f'{_r["km"]:.1f} km · {_r["Longueur (km)"]:.2f} km @ '
+                    f'{_r["Pente (%)"]:.1f} %',
+                    _lbls, key=f"race_strava_pick_{_ridx}")
+                if _pick != "—":
+                    _picks[_ridx] = _cands[_lbls.index(_pick) - 1]
+            if _picks and st.button("📌 Relever le record Strava pour ces montées",
+                                    key="race_strava_apply"):
+                try:
+                    _cl = strava_api.StravaClient(**strava_api.credentials())
+                    _df = st.session_state["race_climb_rows"].copy()
+                    _n = 0
+                    for _ridx, _sg in _picks.items():
+                        _r = _cl.leaderboard_kom(_sg["id"])
+                        if _r and _r.get("time_s"):
+                            _df.loc[_ridx, "Nom / Strava"] = _sg["name"]
+                            _df.loc[_ridx, "Record"] = _fmt_rec(_r["time_s"])
+                            _n += 1
+                    st.session_state["race_climb_rows"] = _df
+                    st.session_state["race_climb_ver"] = \
+                        st.session_state.get("race_climb_ver", 0) + 1
+                    st.session_state["race_strava_ok"] = _n
+                    st.rerun()
+                except strava_api.StravaError as e:
+                    st.error(f"{e}")
+            if st.session_state.get("race_strava_ok"):
+                st.success(f"{st.session_state['race_strava_ok']} record(s) "
+                           "rempli(s) — vérifie et ajuste à la main si besoin "
+                           "(un KOM Strava n'est pas toujours le meilleur temps "
+                           "historique).")
 
 # ── 3 · Équipe & rôles ─────────────────────────────────────────────────────────
 st.subheader("3 · Équipe engagée & rôles")
