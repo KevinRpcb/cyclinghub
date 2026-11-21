@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 
 from core.auth import gate
 from core import strava as strava_api
+from core import stravastore as strava_store
 from core.config import get_secret as _get_secret
 from core.vekta import VektaClient
 from core.tp import TPClient, session_client
@@ -395,6 +396,37 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                 "3️⃣ Recharge la page : un bouton d'autorisation apparaît ici pour "
                 "générer le refresh token.")
     else:
+        # Reconnexion TOUJOURS disponible : le jeton des Secrets peut expirer
+        # ou être révoqué — sans ce bloc, impossible de regénérer sans passer
+        # par un état non configuré (le panneau d'autorisation n'apparaissait
+        # que si AUCUN jeton n'était configuré).
+        with st.expander("🔄 Renouveler la session Strava", expanded=False):
+            st.markdown(
+                "Si les relevés affichent une erreur 401 (jeton expiré ou "
+                "révoqué) : autorise à nouveau ci-dessous, le nouveau jeton "
+                "est enregistré automatiquement dans l'espace privé de "
+                "l'équipe.")
+            st.markdown(f"[🔗 Autoriser à nouveau l'équipe sur Strava]"
+                        f"({strava_api.authorize_url()})")
+            _rc = st.text_input("Code d'autorisation (après ?code=…)",
+                                key="strava_code_re")
+            if st.button("Valider le nouveau jeton",
+                         key="strava_exchange_re") and _rc:
+                try:
+                    _d2 = strava_api.exchange_code(_rc.strip())
+                    if strava_store.save_token(_d2.get("refresh_token", "")):
+                        st.success("✅ Nouvelle session Strava enregistrée "
+                                   "automatiquement — rien à coller, relance "
+                                   "juste le scan.")
+                    else:
+                        st.success("Nouveau jeton reçu ! Colle cette ligne dans "
+                                   "les Secrets Streamlit (remplace STRAVA_"
+                                   "REFRESH_TOKEN), puis recharge la page.")
+                        st.code('STRAVA_REFRESH_TOKEN = "'
+                                f'{_d2.get("refresh_token", "")}"')
+                except strava_api.StravaError as e:
+                    st.error(f"{e}")
+
         _sv = st.session_state.get("race_strava")
         if _sv and _sv.get("sig") == race_name and _sv.get("segments"):
             st.caption(f"Scan en cache : {_sv['zones']} zones interrogées, "
@@ -755,12 +787,25 @@ def _one_plan(row, pace=None):
     cp = min(max(_num_or(row.get("CP (W)"), fb_cp), 150.0), 700.0)
     wp = min(max(_num_or(row.get("W′ (kJ)"), fb_wp), 4.0), 40.0)
     rider = {"cp": cp, "wprime": wp * 1000.0, "mass_total": kg + BIKE_KG}
-    return {"role": role, "kg": kg,
-            **race_plan(climb_list, rest_km, grad_rest, rider, role,
-                        scenario, rho, wind_ms=0.0, fatigue_pct=fatigue,
-                        records=_records_used(leader_mode),
-                        leader_record=(leader_mode != "Max (modèle CP)"),
-                        pace_ref=pace)}
+    try:
+        return {"role": role, "kg": kg,
+                **race_plan(climb_list, rest_km, grad_rest, rider, role,
+                            scenario, rho, wind_ms=0.0, fatigue_pct=fatigue,
+                            records=_records_used(leader_mode),
+                            leader_record=(leader_mode != "Max (modèle CP)"),
+                            pace_ref=pace)}
+    except TypeError as e:
+        # Moteur plus ancien que la page en mémoire (cache du serveur Cloud :
+        # la page est à jour, core/raceplan pas encore). On retombe sur la
+        # gestion à % fixe et l'appli le signale — un Reboot aligne tout.
+        if "pace_ref" in str(e) or "keyword" in str(e).lower():
+            pl = race_plan(climb_list, rest_km, grad_rest, rider, role,
+                           scenario, rho, wind_ms=0.0, fatigue_pct=fatigue,
+                           records=_records_used(leader_mode),
+                           leader_record=(leader_mode != "Max (modèle CP)"))
+            pl["degraded"] = True
+            return {"role": role, "kg": kg, **pl}
+        raise
 
 
 # Leaders d'abord : leur temps sur chaque montée sert de vitesse de groupe
@@ -784,8 +829,16 @@ for _, row in rodf.iterrows():
         plans[n] = _one_plan(row, pace=ref_t)
 
 if not plans:
-    st.warning("Aucun coureur exploitable — vérifie le tableau rôles \ns\n(au moins un nom + une valeur CP).")
+    st.warning("Aucun coureur exploitable — vérifie le tableau rôles "
+               "(au moins un nom + une valeur CP).")
     st.stop()
+
+if any(pl.get("degraded") for pl in plans.values()):
+    st.warning("⚠️ Moteur de calcul en version antérieure (cache du serveur "
+               "après fusion) : les coéquipiers/sprinters suivent un % fixe "
+               "au lieu du rythme du leader. Redémarre l'app (Manage app → "
+               "Reboot) pour tout réaligner — en attendant la page reste "
+               "utilisable.")
 
 winner_s = _parse_rec(winner_txt) or min(p["total_s"] for p in plans.values())
 cut_s = winner_s * (1.0 + delai / 100.0)

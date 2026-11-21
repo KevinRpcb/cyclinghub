@@ -26,9 +26,16 @@ class StravaError(Exception):
 
 # ── Configuration depuis les Secrets ─────────────────────────────────────────
 def is_configured() -> bool:
+    """Prêt si ID + Secret + un refresh token quelque part (Secrets OU
+    Gist privé — le jeton se déplace automatiquement après reconnexion)."""
+    import core.stravastore as _store
+    try:
+        _tok_store = bool(_store.load_token().get("refresh_token"))
+    except Exception:
+        _tok_store = False
     return bool(get_secret("STRAVA_CLIENT_ID")
                 and get_secret("STRAVA_CLIENT_SECRET")
-                and get_secret("STRAVA_REFRESH_TOKEN"))
+                and (get_secret("STRAVA_REFRESH_TOKEN") or _tok_store))
 
 
 def oauth_client_ready() -> bool:
@@ -38,9 +45,18 @@ def oauth_client_ready() -> bool:
 
 
 def credentials() -> dict:
+    """Jeton le plus frais en priorité : Gist privé (sauvegarde auto,
+    cf. stravastore — le jeton des Secrets sert de secours initial)."""
+    import core.stravastore as _store
+    tok = ""
+    try:
+        tok = _store.load_token().get("refresh_token", "") or \
+            get_secret("STRAVA_REFRESH_TOKEN") or ""
+    except Exception:
+        tok = get_secret("STRAVA_REFRESH_TOKEN") or ""
     return {"client_id": get_secret("STRAVA_CLIENT_ID"),
             "client_secret": get_secret("STRAVA_CLIENT_SECRET"),
-            "refresh_token": get_secret("STRAVA_REFRESH_TOKEN")}
+            "refresh_token": tok}
 
 
 def authorize_url(redirect_uri: str = "http://localhost") -> str:
@@ -98,9 +114,16 @@ class StravaClient:
         self._expires = float(d.get("expires_at", time.time() + 3500))
         new_refresh = d.get("refresh_token")
         if new_refresh and new_refresh != self._refresh_token:
-            # Strava peut renvoyer un refresh token : on réutilise celui-ci en
-            # mémoire pour la suite de la session (pas de stockage disque).
+            # Strava ROTE le refresh token : l'ancien devient inutilisable.
+            # On sauvegarde le nouveau dans le Gist privé pour que la session
+            # survive au recyclage du process sur le Cloud (sinon : HTTP 401
+            # au prochain redémarrage). Échec silencieux accepté la 1re fois.
             self._refresh_token = new_refresh
+            try:
+                import core.stravastore as _store
+                _store.save_token(new_refresh, self._expires)
+            except Exception:
+                pass
 
     def _fetch(self, path, params=None):
         return requests.get(f"{BASE}/{path.lstrip('/')}", headers={
