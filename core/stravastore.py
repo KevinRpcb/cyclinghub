@@ -30,14 +30,16 @@ def _gist_id():
     return None
 
 
-def save_token(refresh_token: str, expires_at: float = 0.0) -> bool:
-    """Sauvegarde chiffrée du refresh token frais (échec silencieux :
+def save_token(refresh_token: str, expires_at: float = 0.0,
+               access_token: str = "") -> bool:
+    """Sauvegarde chiffrée des jetons frais (échec silencieux :
     la connexion marche quand même tant que le process vit)."""
     if not (get_secret("GIST_TOKEN") and refresh_token):
         return False
     payload = {"description": _DESC, "public": False,
                "files": {FILE: {"content": encrypt_json(
-                   {"refresh_token": refresh_token, "expires_at": expires_at},
+                   {"refresh_token": refresh_token, "expires_at": expires_at,
+                    "access_token": access_token},
                    plan_key())}}}
     try:
         gid = _gist_id()
@@ -51,7 +53,7 @@ def save_token(refresh_token: str, expires_at: float = 0.0) -> bool:
 
 
 def load_token() -> dict:
-    """{refresh_token, expires_at} ou {} si rien de sauvegardé."""
+    """{refresh_token, expires_at, access_token?} ou {} si rien."""
     if not get_secret("GIST_TOKEN"):
         return {}
     gid = _gist_id()

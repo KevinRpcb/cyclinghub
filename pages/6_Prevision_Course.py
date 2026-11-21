@@ -414,7 +414,10 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                          key="strava_exchange_re") and _rc:
                 try:
                     _d2 = strava_api.exchange_code(_rc.strip())
-                    if strava_store.save_token(_d2.get("refresh_token", "")):
+                    if strava_store.save_token(
+                            _d2.get("refresh_token", ""),
+                            float(_d2.get("expires_at", 0.0) or 0.0),
+                            _d2.get("access_token", "")):
                         st.success("✅ Nouvelle session Strava enregistrée "
                                    "automatiquement — rien à coller, relance "
                                    "juste le scan.")
@@ -426,6 +429,11 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                                 f'{_d2.get("refresh_token", "")}"')
                 except strava_api.StravaError as e:
                     st.error(f"{e}")
+
+            if st.button("🧪 Tester la connexion", key="strava_diag"):
+                for _lbl, _ok, _dtl in strava_api.diag_steps():
+                    (st.success if _ok else st.error)(
+                        f"{'✅' if _ok else '❌'} {_lbl} — {_dtl}")
 
         _sv = st.session_state.get("race_strava")
         if _sv and _sv.get("sig") == race_name and _sv.get("segments"):
