@@ -100,7 +100,7 @@ def power_for_time(grad_pct, len_m, time_s, mass, scx, rho, wind_ms=0.0,
 
 def race_plan(climbs, rest_km, grad_rest, rider, role, scenario="Normal",
               rho=1.225, scx=0.22, wind_ms=0.0, fatigue_pct=0.0, records=None,
-              leader_record=False, draft=0.30):
+              leader_record=False, draft=0.30, pace_ref=None):
     """Temps et énergie d'un parcours pour un coureur.
 
     climbs : montées [(start_km, len_km, grad_pct)] ; rest_km : km hors
@@ -108,6 +108,10 @@ def race_plan(climbs, rest_km, grad_rest, rider, role, scenario="Normal",
     rider : {"cp", "wprime", "mass_total"}.
     Leader : montées à l'effort max (CP + W′/t), fatigué si fatigue_pct > 0
     (réduction proportionnelle de CP et W′).
+    pace_ref : temps de référence de la montée (le leader / le groupe) pour
+    les coéquipiers et sprinters : ils suivent cette vitesse, bornés par leur
+    CP (au-delà, ils lâchent) — les watts varient donc avec chaque montée,
+    au lieu d'un % fixe de CP.
     Retourne dict : total_s, kj, avg_w, climbs=[(time_s, power_w)], rest_s,
     rest_w.
     """
@@ -140,9 +144,22 @@ def race_plan(climbs, rest_km, grad_rest, rider, role, scenario="Normal",
                 t = rec / fat
                 p = power_for_time(grad, len_km * 1000.0, t, mass, scx, rho, wind_ms)
         else:
-            p = cp * CLIMB_PCT.get(role, 0.8)
-            t = climb_time_at_power(grad, len_km * 1000.0, p, mass, scx, rho,
-                                    wind_ms)
+            tref = (pace_ref[i] if pace_ref and i < len(pace_ref)
+                    and pace_ref[i] else None)
+            if tref:
+                # Coéquipier / sprinter : reste dans le groupe — suit la vitesse
+                # de référence (le leader), plafonné par sa PROPRE courbe
+                # P(t) = CP + W′/t (au-delà, il lâche) — watt variable par montée.
+                p = power_for_time(grad, len_km * 1000.0, tref, mass, scx, rho,
+                                   wind_ms)
+                p = max(80.0, min(p, cp + wp_f / max(tref, 20.0)))
+                t = climb_time_at_power(grad, len_km * 1000.0, p, mass, scx,
+                                        rho, wind_ms)
+            else:
+                # Pas de référence : gestion à % fixe de CP (comportement initial).
+                p = cp * CLIMB_PCT.get(role, 0.8)
+                t = climb_time_at_power(grad, len_km * 1000.0, p, mass, scx, rho,
+                                        wind_ms)
         det.append({"start_km": start_km, "len_km": len_km, "grad_pct": grad,
                     "time_s": t, "power_w": p})
         climb_s += t

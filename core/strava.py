@@ -77,6 +77,7 @@ class StravaClient:
         self._token = ""
         self._expires = 0.0
         self.calls = 0
+        self.last_lb_error = ""
 
     def _ensure_token(self):
         if self._token and time.time() < self._expires - 60:
@@ -123,15 +124,18 @@ class StravaClient:
         """(secondes, nom de l'athlète, date ISO) du record du segment,
         ou None si pas de classement accessible. sex = "M" ou "F" filtre
         le classement par genre (équipe hommes + femmes)."""
+        self.last_lb_error = ""
         try:
             params = {"per_page": 1}
             if sex in ("M", "F"):
                 params["gender"] = sex
             lb = self._get(f"segments/{segment_id}/leaderboard", params)
-        except StravaError:
+        except StravaError as e:
+            self.last_lb_error = f"classement {sex or 'H'} : {str(e)[:160]}"
             return None
         entries = lb.get("entries", [])
         if not entries:
+            self.last_lb_error = f"classement {sex or 'H'} : vide"
             return None
         e = entries[0]
         return {"time_s": e.get("elapsed_time"),
