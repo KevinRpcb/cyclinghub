@@ -90,7 +90,9 @@ class StravaClient:
         if r.status_code != 200:
             raise StravaError(
                 f"Rafraîchissement du token impossible (HTTP {r.status_code}) "
-                "— revérifie les Secrets Strava.")
+                "— session Strava expirée ou révoquée : relance l'autorisation "
+                "via le bouton de la page (nouveau code d'autorisation) et "
+                "re-colle le nouveau refresh token dans les Secrets.")
         d = r.json()
         self._token = d.get("access_token", "")
         self._expires = float(d.get("expires_at", time.time() + 3500))
@@ -100,12 +102,29 @@ class StravaClient:
             # mémoire pour la suite de la session (pas de stockage disque).
             self._refresh_token = new_refresh
 
-    def _get(self, path, params=None):
-        self._ensure_token()
-        r = requests.get(f"{BASE}/{path.lstrip('/')}", headers={
+    def _fetch(self, path, params=None):
+        return requests.get(f"{BASE}/{path.lstrip('/')}", headers={
             "Authorization": f"Bearer {self._token}"}, params=params or {},
             timeout=25)
+
+    def _get(self, path, params=None):
+        self._ensure_token()
+        r = self._fetch(path, params)
         self.calls += 1
+        if r.status_code == 401:
+            # Jeton périmé/revoqué en cours de session : on invalide et on
+            # force un rafraîchissement, puis on retente une seule fois.
+            self._token = ""
+            self._expires = 0.0
+            self._ensure_token()
+            r = self._fetch(path, params)
+            self.calls += 1
+            if r.status_code == 401:
+                raise StravaError(
+                    "Strava HTTP 401 : jeton expiré ou révoqué — relance "
+                    "l'autorisation via le bouton de la page (nouveau code "
+                    "d'autorisation), ou re-colle un refresh token frais "
+                    "dans les Secrets.")
         if r.status_code == 429:
             raise StravaError("Quota Strava atteint (200 req / 15 min) — "
                               "réessaie dans quelques minutes.")
