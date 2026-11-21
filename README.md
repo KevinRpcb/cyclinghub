@@ -32,9 +32,12 @@ pages/
                           kJ, glucides g/h, fiches + reco segments de l'étape
   7_Echauffement.py       WU24 natif : protocoles, custom, conditions, stickers
   8_Stem_Values.py        Constructeur de séances : watts par coureur, print à la carte, .fit
-  9_Testing.py            Multi-tools : Lactate Lab, Lactate Terrain, SV1 3×15′, 5′&20′ CP
+  9_Testing.py            Multi-tools : Lactate Lab, Lactate Terrain (paliers rampés),
+                          SV1 3×15′ (P/dist/RPE par bloc), 5′&20′ CP
   10_Labo.py              Veille PubMed multi-IA, brainstorming, propositions
-  11_Rapport_Equipe.py    Rapport d'équipe : fiches, PPR, fatigue, PDF
+  11_Rapport_Equipe.py    Rapport d'équipe : 1 fiche par coureur (1 feuille occasion),
+                          PPR vs record (%), fatigue, PDF
+  assets/                 Icône de l'app (logo Strava API, etc.)
 ```
 
 ## Secrets requis (Streamlit Cloud → App → Settings → Secrets)

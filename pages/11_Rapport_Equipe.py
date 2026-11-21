@@ -99,8 +99,7 @@ def _ppr_from_profile(pp):
 def _ppr_svg(r):
     import math
     series = [("Période", r["ppr"], "#2563eb", "2.2", ""),
-              ("Saison -1", r["ppr_prev"], "#94a3b8", "1.6", "6 3"),
-              ("All-time", r["ppr_all"], "#111318", "1.6", "2 3")]
+              ("Record", r["ppr_all"], "#111318", "1.8", "2 3")]
     series = [(lbl, d, c, w, da) for lbl, d, c, w, da in series if d]
     if not series:
         return ('<div style="font-size:11px;color:#7a8194;padding:6px 0">'
@@ -277,7 +276,7 @@ if st.button("📄 Générer le rapport", type="primary") or _want_auto:
         mime = "image/png" if (logo_up.type or "").endswith("png") else "image/jpeg"
         logo_uri = f"data:{mime};base64," + base64.b64encode(logo_up.getvalue()).decode()
 
-    cards = ""
+    cards_list = []
     for r in rows:
         v, vp = r["vol"], r["vol_prev"]
         vs, vps = r["vol_season"], r["vol_prev_season"]
@@ -320,18 +319,27 @@ if st.button("📄 Générer le rapport", type="primary") or _want_auto:
             ])
         ppr_rows = ""
         for i, s in enumerate(DURS):
-            cur = f'{r["ppr"][s]} W' if s in r["ppr"] else "—"
-            prv = f'{r["ppr_prev"][s]}' if r["ppr_prev"] and s in r["ppr_prev"] else "—"
-            allw = f'{r["ppr_all"][s]}' if r["ppr_all"] and s in r["ppr_all"] else "—"
+            cur = r["ppr"].get(s)
+            allv = (r["ppr_all"] or {}).get(s)
+            cur_txt = f"{cur} W" if cur else "—"
+            allw = str(allv) if allv else "—"
+            if cur and allv:
+                pct = cur / allv * 100.0
+                pcol = ("#16a34a" if pct >= 97
+                        else "#d97706" if pct >= 90 else "#dc2626")
+                pct_txt = f'<span class="dlt" style="color:{pcol}">{pct:.0f} %</span>'
+            else:
+                pct_txt = "—"
             cls = ' class="alt"' if i % 2 else ""
             ppr_rows += (f'<tr{cls}><td class="dur">{DURS_LBL[i]}</td>'
-                         f'<td><b>{cur}</b></td><td>{prv}</td><td>{allw}</td></tr>')
+                         f'<td><b>{cur_txt}</b></td><td>{allw}</td>'
+                         f'<td>{pct_txt}</td></tr>')
         ppr_note = ("modèle ajusté sur les efforts de la période" if r["model_fit"]
                     else "profil puissance (all-time)")
         ppr_curve = _ppr_svg(r)
         miss_prev = ("" if r["ppr_prev"]
                      else " — aucun effort CLM trouvé l'an dernier sur cette fenêtre")
-        cards += f'''
+        cards_list.append(f'''
 <div class="rider">
   <div class="rider-head">
     <div><div class="rname">{r["name"]}</div>
@@ -346,75 +354,75 @@ if st.button("📄 Générer le rapport", type="primary") or _want_auto:
   <table class="grid"><tr>{fatigue_cells}</tr></table>
   <div class="ppr-title">PPR — puissance moyenne maximale ({ppr_note})</div>
   {ppr_curve}
-  <table class="ppr"><tr><th>Durée</th><th>Période</th><th>Saison -1</th><th>All-time</th></tr>
+  <table class="ppr"><tr><th>Durée</th><th>Période</th><th>Record</th><th>% record</th></tr>
   {ppr_rows}</table>
   <div class="ppr-miss">Efforts trouvés — période : {r["n_eff_now"]} · saison -1 : {r["n_eff_prev"]}{miss_prev}</div>
   <div class="comment">{r["comment"]}</div>
-</div>'''
+</div>''')
 
-    logo_html = (f'<img src="{logo_uri}" style="max-height:46px;max-width:180px;object-fit:contain">'
-                 if logo_uri else '<div style="font-weight:900;letter-spacing:3px;color:rgba(255,255,255,.5)">LOGO</div>')
-    doc = f'''<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-@page {{ size: A4 portrait; margin: 10mm; }}
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: Arial, Helvetica, sans-serif; color: #111318; background: #ffffff; }}
-.hero {{ background: #111318; color: #fff; padding: 16px 20px; display: flex;
-        align-items: center; gap: 16px; border-radius: 8px 8px 0 0; }}
-.hero h1 {{ font-size: 22px; letter-spacing: 2px; text-transform: uppercase; }}
-.hero .sub {{ font-size: 11px; color: rgba(255,255,255,.6); letter-spacing: 1px;
-             text-transform: uppercase; }}
-.rider {{ border: 1px solid #dde0e8; border-top: none; padding: 12px 16px; }}
-.rider:first-of-type {{ border-top: 1px solid #dde0e8; }}
-.rider-head {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }}
-.rname {{ font-size: 17px; font-weight: 900; text-transform: uppercase; letter-spacing: .5px; }}
-.rrole {{ font-size: 11px; color: #7a8194; }}
-.badge {{ color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 1px;
-         padding: 4px 10px; border-radius: 4px; }}
-.sec {{ font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #334155;
-       font-weight: 700; margin: 8px 0 4px; }}
-.sec .dlt2 {{ color: #7a8194; font-weight: 400; letter-spacing: 0; text-transform: none; }}
-table.grid {{ width: 100%; border-collapse: collapse; }}
-table.grid td {{ background: #f4f5f7; border: 1px solid #dde0e8; padding: 6px 8px;
-                text-align: center; }}
-table.grid .lbl {{ display: block; font-size: 8px; letter-spacing: 1px;
-                  text-transform: uppercase; color: #7a8194; margin-bottom: 2px; }}
-table.grid b {{ font-size: 14px; }}
-.dlt {{ font-size: 9px; font-weight: 700; margin-left: 3px; }}
-.ppr-title {{ font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
-             color: #7a8194; margin: 6px 0 4px; }}
-table.ppr {{ width: 100%; border-collapse: collapse; }}
-table.ppr th {{ background: #111318; color: #fff; font-size: 9px; padding: 4px;
-               text-transform: uppercase; letter-spacing: 1px; }}
-table.ppr td {{ border: 1px solid #dde0e8; padding: 5px 8px; text-align: center; font-size: 13px; }}
-table.ppr tr.alt td {{ background: #f8fafc; }}
-table.ppr td.dur {{ font-weight: 700; background: #f4f5f7; font-size: 11px; }}
-.ppr-miss {{ font-size: 9px; color: #7a8194; margin-top: 3px; }}
-.comment {{ margin-top: 6px; font-size: 11px; color: #334155; background: #f8fafc;
-           border-left: 3px solid #3b82f6; padding: 6px 10px; }}
-.printbtn {{ position: fixed; top: 12px; right: 12px; background: #111318; color: #fff;
-            border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold;
-            cursor: pointer; }}
-@media print {{ .printbtn {{ display: none; }} }}
-</style></head><body>
-<button class="printbtn" onclick="window.print()">🖨️ Print / PDF</button>
-<div class="hero">{logo_html}<div><div class="sub">Team report — {period_lbl}</div>
-<h1>Rapport d'équipe</h1></div>
+    logo_html = (f'<img src="{logo_uri}" style="max-height:46px;max-width:180px;'
+                 'object-fit:contain">'
+                 if logo_uri
+                 else '<div style="font-weight:900;letter-spacing:3px;'
+                      'color:rgba(255,255,255,.5)">LOGO</div>')
+    css_block = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+@page { size: A4 portrait; margin: 10mm; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; color: #111318; background: #ffffff; }
+.hero { background: #111318; color: #fff; padding: 16px 20px; display: flex;
+        align-items: center; gap: 16px; border-radius: 8px 8px 0 0; }
+.hero h1 { font-size: 22px; letter-spacing: 2px; text-transform: uppercase; }
+.hero .sub { font-size: 11px; color: rgba(255,255,255,.6); letter-spacing: 1px;
+             text-transform: uppercase; }
+.rider { border: 1px solid #dde0e8; padding: 12px 16px; page-break-after: always; }
+.rider-head { display: flex; justify-content: space-between; align-items: center;
+              margin-bottom: 8px; }
+.rname { font-size: 17px; font-weight: 900; text-transform: uppercase;
+         letter-spacing: .5px; }
+.rrole { font-size: 11px; color: #7a8194; }
+.badge { color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+         padding: 4px 10px; border-radius: 4px; }
+.sec { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #334155;
+       font-weight: 700; margin: 8px 0 4px; }
+.sec .dlt2 { color: #7a8194; font-weight: 400; letter-spacing: 0;
+             text-transform: none; }
+table.grid { width: 100%; border-collapse: collapse; }
+table.grid td { background: #f4f5f7; border: 1px solid #dde0e8; padding: 6px 8px;
+                text-align: center; }
+table.grid .lbl { display: block; font-size: 8px; letter-spacing: 1px;
+                  text-transform: uppercase; color: #7a8194; margin-bottom: 2px; }
+table.grid b { font-size: 14px; }
+.dlt { font-size: 9px; font-weight: 700; margin-left: 3px; }
+.ppr-title { font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+             color: #7a8194; margin: 6px 0 4px; }
+table.ppr { width: 100%; border-collapse: collapse; }
+table.ppr th { background: #111318; color: #fff; font-size: 9px; padding: 4px;
+               text-transform: uppercase; letter-spacing: 1px; }
+table.ppr td { border: 1px solid #dde0e8; padding: 5px 8px; text-align: center;
+               font-size: 13px; }
+table.ppr tr.alt td { background: #f8fafc; }
+table.ppr td.dur { font-weight: 700; background: #f4f5f7; font-size: 11px; }
+.ppr-miss { font-size: 9px; color: #7a8194; margin-top: 3px; }
+.comment { margin-top: 6px; font-size: 11px; color: #334155; background: #f8fafc;
+           border-left: 3px solid #3b82f6; padding: 6px 10px; }
+.printbtn { position: fixed; top: 12px; right: 12px; background: #111318;
+            color: #fff; border: none; padding: 10px 18px; border-radius: 6px; }
+@media print { .printbtn { display: none; } }
+</style></head><body>"""
+    n_docs = 0
+    for rcard in cards_list:
+        doc = (css_block + f'''
+<button class="printbtn" onclick="window.print()">\U0001F5A8 Print / PDF (1 coureur = 1 feuille)</button>
+<div class="hero">{logo_html}<div><div class="sub">Team report \u2014 {period_lbl}</div>
+<h1>Rapport d'\u00e9quipe</h1></div>
 <div style="margin-left:auto;text-align:center;background:rgba(255,255,255,.1);padding:8px 16px;border-radius:6px">
 <span style="font-size:10px;color:rgba(255,255,255,.6)">DATE</span><br>
 <b style="font-size:16px">{rdate.strftime("%d/%m/%Y")}</b></div></div>
-{cards}
-</body></html>'''
-    with st.expander("🔍 Diagnostic données du rapport"):
-        for r in rows:
-            st.write(f"**{r['name']}** : efforts période **{r['n_eff_now']}** · "
-                     f"saison -1 **{r['n_eff_prev']}** · PPR période "
-                     f"{'✅' if r['ppr'] else '—'} · all-time "
-                     f"{'✅' if r['ppr_all'] else '—'} · volume "
-                     f"{'✅' if r['vol'] else '—'}")
-        if getattr(client, "last_error", None):
-            st.write(f"Note source : {client.last_error}")
-        st.caption("Photographie ce bloc et envoie-le moi si des colonnes restent vides.")
-    components.html(doc, height=1100, scrolling=True)
+{rcard}
+</body></html>''')
+        components.html(doc, height=1150, scrolling=False)
+        n_docs += 1
+
 
 st.divider()
 st.caption("Données : " + ("TrainingPeaks (lecture seule)" if isinstance(client, TPClient)
