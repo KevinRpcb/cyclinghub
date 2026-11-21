@@ -45,18 +45,22 @@ def oauth_client_ready() -> bool:
 
 
 def credentials() -> dict:
-    """Jeton le plus frais en priorité : Gist privé (sauvegarde auto,
-    cf. stravastore — le jeton des Secrets sert de secours initial)."""
+    """Jetons les plus frais en priorité : Gist privé (sauvegarde auto,
+    cf. stravastore — les Secrets servent de secours initial)."""
     import core.stravastore as _store
-    tok = ""
+    tok, atok, aexp = "", "", 0.0
     try:
-        tok = _store.load_token().get("refresh_token", "") or \
-            get_secret("STRAVA_REFRESH_TOKEN") or ""
+        _d = _store.load_token()
+        tok = _d.get("refresh_token", "") or get_secret("STRAVA_REFRESH_TOKEN") or ""
+        atok = _d.get("access_token", "") or ""
+        aexp = float(_d.get("expires_at", 0.0) or 0.0)
     except Exception:
         tok = get_secret("STRAVA_REFRESH_TOKEN") or ""
     return {"client_id": get_secret("STRAVA_CLIENT_ID"),
             "client_secret": get_secret("STRAVA_CLIENT_SECRET"),
-            "refresh_token": tok}
+            "refresh_token": tok,
+            "access_token": atok,
+            "expires_at": aexp}
 
 
 def authorize_url(redirect_uri: str = "http://localhost") -> str:
@@ -65,6 +69,62 @@ def authorize_url(redirect_uri: str = "http://localhost") -> str:
     return (f"{OAUTH_AUTHORIZE_URL}?client_id={cid}&response_type=code"
             f"&redirect_uri={quote(redirect_uri)}"
             f"&approval_prompt=auto&scope=read")
+
+
+def diag_steps() -> list:
+    """Diagnostic pas-à-pas de la connexion Strava (aucune donnée sensible
+    affichée — que des ✅/❌, codes HTTP et 4 derniers caractères). Servit à
+    identifier avec le coach l'étape exacte où la session casse.
+    Retourne [(étape, ok, détail)]."""
+    out = []
+    cid, sec = get_secret("STRAVA_CLIENT_ID"), get_secret("STRAVA_CLIENT_SECRET")
+    if not (cid and sec):
+        out.append(("Configuration", False,
+                    "STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET absents des Secrets"))
+        return out
+    rt = get_secret("STRAVA_REFRESH_TOKEN")
+    import core.stravastore as _store
+    try:
+        _d = _store.load_token()
+        if _d.get("refresh_token"):
+            rt = _d["refresh_token"]
+            out.append(("Jeton sauvegardé (Gist privé)", True,
+                        "trouvé · …" + str(rt)[-4:]))
+        else:
+            out.append(("Jeton sauvegardé (Gist privé)", False,
+                        "aucun — on utilise le jeton des Secrets"))
+    except Exception as e:
+        out.append(("Jeton sauvegardé (Gist privé)", False,
+                    f"lecture impossible : {type(e).__name__}"))
+    out.append(("ID / Secret", bool(cid and sec),
+                f"client {str(cid)[-4:] if cid else '—'}"))
+    if not rt:
+        out.append(("Refresh token", False, "aucun jeton disponible"))
+        return out
+    r = requests.post(OAUTH_TOKEN_URL, data={
+        "client_id": cid, "client_secret": sec,
+        "grant_type": "refresh_token", "refresh_token": rt}, timeout=20)
+    if r.status_code != 200:
+        out.append(("Rafraîchissement", False,
+                    f"HTTP {r.status_code} — jeton refusé par Strava : "
+                    "autorise à nouveau (bouton ci-dessus)"))
+        return out
+    tok = r.json().get("access_token", "")
+    out.append(("Rafraîchissement", True,
+                "OK · accès …" + tok[-4:] if tok else "OK (jeton vide ?)"))
+    h = {"Authorization": f"Bearer {tok}"}
+    r2 = requests.get(f"{BASE}/athlete", headers=h, timeout=20)
+    out.append(("Test profil (/athlete)", r2.status_code == 200,
+                f"HTTP {r2.status_code}"
+                + (" — jeton accepté" if r2.status_code == 200 else "")))
+    r3 = requests.get(f"{BASE}/segments/explore",
+                      headers=h, params={"bounds": "44,5,44.01,5.01"},
+                      timeout=25)
+    out.append(("Test segments (/segments/explore)", r3.status_code == 200,
+                f"HTTP {r3.status_code}"
+                + ("" if r3.status_code == 200 else
+                   " — " + r3.text[:120] if r3.text else "")))
+    return out
 
 
 def exchange_code(code: str) -> dict:
@@ -84,14 +144,17 @@ def exchange_code(code: str) -> dict:
 
 # ── Client ───────────────────────────────────────────────────────────────────
 class StravaClient:
-    def __init__(self, client_id: str, client_secret: str, refresh_token: str):
+    def __init__(self, client_id: str, client_secret: str, refresh_token: str,
+                 access_token: str = "", expires_at: float = 0.0):
         if not (client_id and client_secret and refresh_token):
             raise StravaError("Strava non configuré — Secrets manquants.")
         self._cid = client_id
         self._sec = client_secret
         self._refresh_token = refresh_token
-        self._token = ""
-        self._expires = 0.0
+        # Jeton d'accès pré-chargé (issu de l'autorisation ou du store) :
+        # utilisable tout de suite si encore valide, sans rafraîchir.
+        self._token = access_token or ""
+        self._expires = float(expires_at or 0.0)
         self.calls = 0
         self.last_lb_error = ""
 
@@ -121,7 +184,7 @@ class StravaClient:
             self._refresh_token = new_refresh
             try:
                 import core.stravastore as _store
-                _store.save_token(new_refresh, self._expires)
+                _store.save_token(new_refresh, self._expires, self._token)
             except Exception:
                 pass
 
@@ -146,8 +209,8 @@ class StravaClient:
                 raise StravaError(
                     "Strava HTTP 401 : jeton expiré ou révoqué — relance "
                     "l'autorisation via le bouton de la page (nouveau code "
-                    "d'autorisation), ou re-colle un refresh token frais "
-                    "dans les Secrets.")
+                    "d'autorisation), puis utilise « 🧪 Tester la connexion » "
+                    "pour voir d'où vient le blocage.")
         if r.status_code == 429:
             raise StravaError("Quota Strava atteint (200 req / 15 min) — "
                               "réessaie dans quelques minutes.")
