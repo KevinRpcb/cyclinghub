@@ -526,21 +526,72 @@ elif tool == "sv1":
                        tdf.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
                        "cibles_sv1_3x15.csv", "text/csv")
 
-    st.subheader("2 · Lactates après chaque bloc de 15'")
+    st.subheader("2 \u00b7 Mesures prises pendant la s\u00e9ance")
+    st.caption("Par bloc : lactate (piq\u00fbre juste apr\u00e8s), FC moyenne, puissance "
+               "moyenne (compteur), distance et RPE. Le lactate de repos sert de base "
+               "de comparaison. Enregistre par coureur \u2014 rien n'est perdu pendant la "
+               "frappe, et les valeurs d\u00e9j\u00e0 saisies sont reprises au chargement.")
     sv1_rider = st.selectbox("Coureur", sel, key="sv1_rider")
+    _prev_sv1 = st.session_state.get("sv1_data", {}).get(sv1_rider, {})
+    _prev_p = _prev_sv1.get("p") or [None, None, None]
+    _prev_km = _prev_sv1.get("km") or [None, None, None]
+    _prev_rpe = _prev_sv1.get("rpe") or [None, None, None]
+    _prev_lr = _prev_sv1.get("la_repos")
     with st.form("sv1_entry"):
-        e1, e2, e3 = st.columns(3)
-        la1 = e1.number_input("Lactate bloc 1 (mmol/L)", 0.0, 20.0, 1.5, 0.1, format="%.1f")
-        la2 = e2.number_input("Lactate bloc 2", 0.0, 20.0, 1.5, 0.1, format="%.1f")
-        la3 = e3.number_input("Lactate bloc 3", 0.0, 20.0, 1.5, 0.1, format="%.1f")
-        f1, f2, f3 = st.columns(3)
-        fc1 = f1.number_input("FC moy. bloc 1", 80, 230, 150)
-        fc2 = f2.number_input("FC moy. bloc 2", 80, 230, 150)
-        fc3 = f3.number_input("FC moy. bloc 3", 80, 230, 150)
-        if st.form_submit_button("💾 Enregistrer ces lactates"):
+        st.markdown(f"**{sv1_rider}** \u2014 repos : lactate saisi ci-dessous comme base")
+        _lr = st.number_input("Lactate de repos (mmol/L)", 0.0, 20.0,
+                              float(_prev_lr) if _prev_lr else 0.8, 0.1,
+                              format="%.1f")
+        _hcols = st.columns(3)
+        for _i, _h in enumerate(["Bloc 1", "Bloc 2", "Bloc 3"]):
+            _hcols[_i].caption(_h)
+        _la_c = st.columns(3)
+        la1 = _la_c[0].number_input("Lactate bloc 1 (mmol/L)", 0.0, 20.0, 1.5, 0.1,
+                                    format="%.1f")
+        la2 = _la_c[1].number_input("Lactate bloc 2 (mmol/L)", 0.0, 20.0, 1.5, 0.1,
+                                    format="%.1f")
+        la3 = _la_c[2].number_input("Lactate bloc 3 (mmol/L)", 0.0, 20.0, 1.5, 0.1,
+                                    format="%.1f")
+        _fc_c = st.columns(3)
+        fc1 = _fc_c[0].number_input("FC moy. bloc 1 (bpm)", 80, 230, 150)
+        fc2 = _fc_c[1].number_input("FC moy. bloc 2 (bpm)", 80, 230, 150)
+        fc3 = _fc_c[2].number_input("FC moy. bloc 3 (bpm)", 80, 230, 150)
+        _pw_c = st.columns(3)
+        pw1 = _pw_c[0].number_input("P moy. bloc 1 (W)", 0, 800,
+                                    int(_prev_p[0]) if _prev_p[0] else 0)
+        pw2 = _pw_c[1].number_input("P moy. bloc 2 (W)", 0, 800,
+                                    int(_prev_p[1]) if _prev_p[1] else 0)
+        pw3 = _pw_c[2].number_input("P moy. bloc 3 (W)", 0, 800,
+                                    int(_prev_p[2]) if _prev_p[2] else 0)
+        _km_c = st.columns(3)
+        km1 = _km_c[0].number_input("Distance bloc 1 (km)", 0.0, 100.0,
+                                    float(_prev_km[0]) if _prev_km[0] else 0.0,
+                                    0.1, format="%.1f")
+        km2 = _km_c[1].number_input("Distance bloc 2 (km)", 0.0, 100.0,
+                                    float(_prev_km[1]) if _prev_km[1] else 0.0,
+                                    0.1, format="%.1f")
+        km3 = _km_c[2].number_input("Distance bloc 3 (km)", 0.0, 100.0,
+                                    float(_prev_km[2]) if _prev_km[2] else 0.0,
+                                    0.1, format="%.1f")
+        _rp_c = st.columns(3)
+        rpe1 = _rp_c[0].number_input("RPE bloc 1 (/10)", 0.0, 10.0,
+                                     float(_prev_rpe[0]) if _prev_rpe[0] else 0.0,
+                                     0.5, format="%.1f")
+        rpe2 = _rp_c[1].number_input("RPE bloc 2 (/10)", 0.0, 10.0,
+                                     float(_prev_rpe[1]) if _prev_rpe[1] else 0.0,
+                                     0.5, format="%.1f")
+        rpe3 = _rp_c[2].number_input("RPE bloc 3 (/10)", 0.0, 10.0,
+                                     float(_prev_rpe[2]) if _prev_rpe[2] else 0.0,
+                                     0.5, format="%.1f")
+        if st.form_submit_button("\ud83d\udcbe Enregistrer ces donn\u00e9es"):
             st.session_state.setdefault("sv1_data", {})[sv1_rider] = {
                 "la": [la1, la2, la3], "fc": [fc1, fc2, fc3],
-                "group": group_of.get(sv1_rider, "—")}
+                "p": [pw1 or None, pw2 or None, pw3 or None],
+                "km": [km1 or None, km2 or None, km3 or None],
+                "rpe": [rpe1 or None, rpe2 or None, rpe3 or None],
+                "la_repos": _lr,
+                "group": group_of.get(sv1_rider, "\u2014")}
+
 
     data = st.session_state.get("sv1_data", {})
     entered = [n for n in sel if n in data]
@@ -568,13 +619,50 @@ elif tool == "sv1":
               "Dérive B1→B3": f"{data[n]['la'][2] - data[n]['la'][0]:+.1f}",
               "Verdict": sv1_global(data[n])} for n in entered]),
             hide_index=True, use_container_width=True)
+        def _tgt_of(rider):
+            tdf = st.session_state.get(tgt_key)
+            if isinstance(tdf, pd.DataFrame) and not tdf.empty:
+                for _, trow in tdf.iterrows():
+                    if str(trow.get("Coureur", "")).strip() == rider:
+                        return trow
+            return None
+
         for n in entered:
             d = data[n]
             trend = sv1_trend(d["la"])
             with st.expander(f"{n} — {d['group']}"):
-                for i, (la, fc) in enumerate(zip(d["la"], d["fc"])):
-                    st.markdown(f"**Bloc {i + 1}** : lactate **{la:.1f} mmol/L** — "
-                                f"{sv1_block_verdict(la)} · FC moyenne {fc:.0f} bpm")
+                if d.get("la_repos") is not None:
+                    st.caption(f"Lactate de repos : {d['la_repos']:.1f} mmol/L")
+                _trow = _tgt_of(n)
+                for i in range(3):
+                    la_i = d["la"][i]
+                    fc_i = d["fc"][i]
+                    p_i = (d.get("p") or [None] * 3)[i]
+                    km_i = (d.get("km") or [None] * 3)[i]
+                    rpe_i = (d.get("rpe") or [None] * 3)[i]
+                    bits = [f"lactate **{la_i:.1f} mmol/L** — "
+                            f"{sv1_block_verdict(la_i)}",
+                            f"FC moy. {fc_i:.0f} bpm"]
+                    if p_i:
+                        bits.append(f"P moy. {p_i:.0f} W "
+                                    f"({p_i / weight_of(n):.1f} W/kg)")
+                    if km_i:
+                        bits.append(f"{km_i:.1f} km")
+                    if rpe_i:
+                        bits.append(f"RPE {rpe_i:.0f}/10")
+                    st.markdown(f"**Bloc {i + 1}** : " + " · ".join(bits))
+                    if _trow is not None:
+                        lo_f = _num(_trow.get("FC basse"))
+                        hi_f = _num(_trow.get("FC haute"))
+                        if lo_f and hi_f and not (lo_f - 3 <= fc_i <= hi_f + 2):
+                            st.caption("🟠 FC hors fenêtre cible "
+                                       f"({lo_f:.0f}–{hi_f:.0f} bpm)")
+                        pl = _num(_trow.get("P basse (W)"))
+                        ph = _num(_trow.get("P haute (W)"))
+                        if pv_al := _num(p_i):
+                            if pl and ph and not (pl - 12 <= pv_al <= ph + 12):
+                                st.caption("🟠 Puissance hors fenêtre cible "
+                                           f"({pl:.0f}–{ph:.0f} W)")
                 if trend:
                     st.info(f"**{trend[0].capitalize()}** — {trend[1]}")
                 st.markdown(f"**Bilan :** {sv1_global(d)}")
@@ -588,10 +676,20 @@ elif tool == "sv1":
             for g in sorted({data[n]["group"] for n in pool}):
                 members = [n for n in pool if data[n]["group"] == g]
                 las = np.array([data[n]["la"] for n in members], dtype=float)
+
+                def _bmean(key, idx):
+                    vals = [(data[n].get(key) or [None] * 3)[idx] for n in members]
+                    vals = [float(v) for v in vals if v is not None and np.isfinite(v)]
+                    return round(float(np.mean(vals)), 1) if vals else None
+
                 agg.append({"Groupe": g, "Coureurs": len(members),
                             "Lactate moy. B1": round(float(las[:, 0].mean()), 2),
                             "Lactate moy. B2": round(float(las[:, 1].mean()), 2),
                             "Lactate moy. B3": round(float(las[:, 2].mean()), 2),
+                            "P moy. B1 (W)": _bmean("p", 0),
+                            "P moy. B2 (W)": _bmean("p", 1),
+                            "P moy. B3 (W)": _bmean("p", 2),
+                            "RPE moy.": _bmean("rpe", 2),
                             "Dérive moy.": round(float((las[:, 2] - las[:, 0]).mean()), 2),
                             "Bloc(s) ≥ 4": int((las >= 4.0).sum()),
                             "Bloc(s) < 1,5": int((las < 1.5).sum())})
@@ -612,13 +710,24 @@ elif tool == "sv1":
                                           xanchor="right", x=1))
             st.plotly_chart(fig, use_container_width=True)
             st.download_button("⬇️ Résultats SV1 (CSV)",
-                               pd.DataFrame([{"Coureur": n, "Groupe": data[n]["group"],
+                               pd.DataFrame([{"Coureur": n,
+                                              "Groupe": data[n]["group"],
+                                              "Lactate repos": data[n].get("la_repos"),
                                               "Lactate B1": data[n]["la"][0],
                                               "Lactate B2": data[n]["la"][1],
                                               "Lactate B3": data[n]["la"][2],
                                               "FC moy. B1": data[n]["fc"][0],
                                               "FC moy. B2": data[n]["fc"][1],
                                               "FC moy. B3": data[n]["fc"][2],
+                                              "P moy. B1 (W)": (data[n].get("p") or [None] * 3)[0],
+                                              "P moy. B2 (W)": (data[n].get("p") or [None] * 3)[1],
+                                              "P moy. B3 (W)": (data[n].get("p") or [None] * 3)[2],
+                                              "Distance B1 (km)": (data[n].get("km") or [None] * 3)[0],
+                                              "Distance B2 (km)": (data[n].get("km") or [None] * 3)[1],
+                                              "Distance B3 (km)": (data[n].get("km") or [None] * 3)[2],
+                                              "RPE B1": (data[n].get("rpe") or [None] * 3)[0],
+                                              "RPE B2": (data[n].get("rpe") or [None] * 3)[1],
+                                              "RPE B3": (data[n].get("rpe") or [None] * 3)[2],
                                               "Verdict": sv1_global(data[n])}
                                              for n in pool]).to_csv(
                                    index=False, sep=";", decimal=",").encode("utf-8-sig"),
@@ -627,195 +736,402 @@ elif tool == "sv1":
         st.info("Enregistre les lactates d'un coureur ci-dessus pour lancer les analyses.")
 
 
-# ═══════════════════════════════ TEST DE TERRAIN — COLLECTE ═══════════════════════════════
+# ═════════════════════ TEST LACTATE DE TERRAIN — PALIERS RAMPÉS ═════════════════════
 elif tool == "field":
-    st.subheader("Collecte test de terrain")
-    st.caption(
-        "Une ligne par coureur et par test. Puissance et FC saisies = **moyennes sur la montée**. La **puissance révisée** applique la formule de "
-        "l'équipe : P révisée = P − ((FC − 0,8 × FCmax) / FCmax) × P — la puissance est "
-        "ajustée proportionnellement à l'écart de la FC par rapport à 80 % de la FCmax "
-        "(au-dessus → révisée à la baisse, en dessous → à la hausse). "
-        "🔴 rouge = perf suspecte (à vérifier avant d'exploiter) · "
-        "🟠 orange = point de vigilance.")
 
-    FIELD_COLS = ["Nom", "Groupe", "Date", "Lieu", "Durée (min)", "Puissance moy. (W)",
-                  "FC moy. (bpm)", "FCmax (bpm)", "Récup 1' (bpm)", "Lactate (mmol/L)",
-                  "RPE", "Poids (kg)"]
-    field_key = "field_collect"
-    if not isinstance(st.session_state.get(field_key), pd.DataFrame) or \
-            st.session_state[field_key].empty:
-        st.session_state[field_key] = pd.DataFrame(
-            [{"Nom": "", "Groupe": GROUPS[0], "Date": "", "Lieu": "",
-              "Durée (min)": None, "Puissance moy. (W)": None, "FC moy. (bpm)": None,
-              "FCmax (bpm)": None, "Récup 1' (bpm)": None, "Lactate (mmol/L)": None,
-              "RPE": None, "Poids (kg)": None}])
-    st.caption("Saisis puis clique sur 💾 Enregistrer — rien n'est perdu "
-               "pendant la frappe.")
-    try:
-        with st.form("field_form", clear_on_submit=False):
-            fdf = st.data_editor(
-                st.session_state[field_key].reindex(columns=FIELD_COLS), key="field_ed",
-                hide_index=True, use_container_width=True, num_rows="dynamic",
-                column_config={
-                    "Nom": st.column_config.TextColumn("Nom", required=True),
-                    "Groupe": st.column_config.SelectboxColumn("Groupe", options=GROUPS,
-                                                               required=True),
-                    "Date": st.column_config.TextColumn("Date", help="JJ/MM/AAAA"),
-                    "Lieu": st.column_config.TextColumn("Lieu"),
-                    "Durée (min)": st.column_config.NumberColumn("Durée (min)",
-                                                                 min_value=0.0,
-                                                                 max_value=600.0,
-                                                                 step=0.5),
-                    "Puissance moy. (W)": st.column_config.NumberColumn(
-                        "Puissance moy. (W)", min_value=50, max_value=1200, step=1),
-                    "FC moy. (bpm)": st.column_config.NumberColumn(
-                        "FC moy. (bpm)", min_value=80, max_value=230, step=1),
-                    "FCmax (bpm)": st.column_config.NumberColumn("FCmax (bpm)",
-                                                                 min_value=120,
-                                                                 max_value=230, step=1),
-                    "Récup 1' (bpm)": st.column_config.NumberColumn(
-                        "Récup 1' (bpm)", min_value=60, max_value=230, step=1),
-                    "Lactate (mmol/L)": st.column_config.NumberColumn(
-                        "Lactate (mmol/L)", min_value=0.0, max_value=20.0, step=0.1,
-                        format="%.1f"),
-                    "RPE": st.column_config.NumberColumn("RPE", min_value=1.0,
-                                                         max_value=10.0, step=0.5),
-                    "Poids (kg)": st.column_config.NumberColumn("Poids (kg)",
-                                                                min_value=30.0,
-                                                                max_value=120.0,
-                                                                step=0.5),
-                })
-            saved_f = st.form_submit_button("💾 Enregistrer la collecte")
-    except Exception:
-        st.session_state[field_key] = pd.DataFrame(
-            [{c: None for c in FIELD_COLS}])
-        st.warning("Tableau réinitialisé (état incompatible détecté).")
-        st.rerun()
-    if saved_f:
-        st.session_state[field_key] = fdf
+    def _round0(v):
+        return round(v) if v else None
 
-    RED_FLAGS = {"FC ≥ FCmax", "W/kg atypique vs groupe"}
+    def _round1(v):
+        return round(v, 1) if v else None
 
-    def field_flags(p, p_rev, fc, fcmax, rec, la, dur, wkg, grp_vals):
-        flags = []
-        if fc and fcmax and fc >= fcmax:
-            flags.append("FC ≥ FCmax")
-        if fc and fcmax and fc < 0.60 * fcmax:
-            flags.append("FC très basse")
-        if p and p_rev and abs(p_rev - p) / p > 0.10:
-            flags.append("révision > 10 %")
-        if fc and rec and 0 < fc - rec < 15:
-            flags.append("récup 1' faible")
-        if la is None:
-            flags.append("lactate manquant")
-        if dur and (dur < 3 or dur > 90):
-            flags.append("durée inhabituelle")
-        if wkg and len(grp_vals) >= 3:
-            arr = np.array(grp_vals, dtype=float)
-            sd = float(arr.std())
-            if sd > 0 and abs(wkg - float(arr.mean())) > 2 * sd:
-                flags.append("W/kg atypique vs groupe")
-        return flags
+    def _round2(v):
+        return round(v, 2) if v else None
+
+    def _palette(row):
+        color = ("#fee2e2" if row.get("_niveau") == "rouge"
+                 else "#fef3c7" if row.get("_niveau") == "orange" else "")
+        return [f"background-color:{color}"] * len(row) if color \
+            else [""] * len(row)
 
     def rev_power(p, fc, fcmax):
+        """Formule équipe : P révisée = P − ((FC − 0,8 × FCmax) / FCmax) × P."""
         if not (p and fc and fcmax):
             return None
         return p - ((fc - 0.8 * fcmax) / fcmax) * p
 
-    def field_computed(df):
-        rows = []
-        raw = df.to_dict("records")
-        for r in raw:
-            nom = str(r.get("Nom") or "").strip()
-            if not nom or nom.lower() == "nan":
+    def field_report_for(n, ft, method):
+        """Analyse complète du test terrain d'un coureur : seuils sur la
+        puissance révisée, zones, paliers suspects, graphique."""
+        grp = ft.get("group") or group_of.get(n, "—")
+        paliers_raw = []
+        pals = ft.get("paliers")
+        if not isinstance(pals, pd.DataFrame):
+            return {"error": "aucun palier enregistré"}
+        for i, r0 in pals.iterrows():
+            p = _num(r0.get("P moy. (W)"))
+            if not p:
                 continue
-            p = _num(r.get("Puissance moy. (W)"))
-            fc = _num(r.get("FC moy. (bpm)"))
-            fcmax = _num(r.get("FCmax (bpm)"))
-            rec = _num(r.get("Récup 1' (bpm)"))
-            la = _num(r.get("Lactate (mmol/L)"))
-            dur = _num(r.get("Durée (min)"))
-            kg = _num(r.get("Poids (kg)"))
-            p_rev = rev_power(p, fc, fcmax)
-            wkg = (p_rev / kg) if (p_rev and kg) else None
-            grp = str(r.get("Groupe") or "—")
-            grp_vals = []
-            for x in raw:
-                if str(x.get("Groupe") or "—") != grp or \
-                        not str(x.get("Nom") or "").strip():
-                    continue
-                xv = rev_power(_num(x.get("Puissance moy. (W)")), _num(x.get("FC moy. (bpm)")),
-                               _num(x.get("FCmax (bpm)")))
-                xkg = _num(x.get("Poids (kg)"))
-                if xv and xkg:
-                    grp_vals.append(xv / xkg)
-            flags = field_flags(p, p_rev, fc, fcmax, rec, la, dur, wkg, grp_vals)
-            rows.append({
-                "Nom": nom, "Groupe": grp, "Date": str(r.get("Date") or ""),
-                "Lieu": str(r.get("Lieu") or ""),
-                "Durée (min)": dur, "Puissance moy. (W)": p,
-                "P révisée (W)": round(p_rev) if p_rev else None,
-                "FC moy. (bpm)": fc, "FCmax (bpm)": fcmax,
-                "80% FCmax": round(0.8 * fcmax) if fcmax else None,
-                "Récup 1' (bpm)": rec, "Lactate (mmol/L)": la, "RPE": _num(r.get("RPE")),
-                "W/kg (révisée)": round(wkg, 2) if wkg else None,
-                "⚠️ Suspect": " · ".join(flags), "_niveau":
-                    "rouge" if RED_FLAGS & set(flags) else ("orange" if flags else "")})
-        return pd.DataFrame(rows)
+            fc = _num(r0.get("FC moy. (bpm)"))
+            la = _num(r0.get("Lactate (mmol/L)"))
+            dur = _num(r0.get("Durée (min)"))
+            rpe = _num(r0.get("RPE (/10)"))
+            prv = rev_power(p, fc, _num(ft.get("fcmax")))
+            paliers_raw.append({"Palier": i + 1, "Durée (min)": dur,
+                                "P moy. (W)": p, "FC moy. (bpm)": fc,
+                                "Lactate (mmol/L)": la, "RPE": rpe,
+                                "P révisée (W)": prv})
+        if len([r for r in paliers_raw if r["Lactate (mmol/L)"] is not None]) < 2:
+            return {"error": "moins de 2 lactates saisis — seuils impossibles"}
+        paliers_raw.sort(key=lambda r: (r["P révisée (W)"] or r["P moy. (W)"]))
+        prev_la = None
+        for r in paliers_raw:
+            flags = []
+            p, fc = r["P moy. (W)"], r["FC moy. (bpm)"]
+            prv, la = r["P révisée (W)"], r["Lactate (mmol/L)"]
+            dur = r["Durée (min)"]
+            if prv:
+                r["W/kg"] = round(prv / (ft["poids"] or 70.0), 2)
+            if fc is not None and _num(ft.get("fcmax")):
+                r["% FCmax"] = round(fc / _num(ft.get("fcmax")) * 100)
+                if fc >= _num(ft.get("fcmax")):
+                    flags.append("FC ≥ FCmax")
+            if la is None:
+                flags.append("lactate manquant")
+            elif prev_la is not None and la < prev_la - 0.4:
+                flags.append("courbe inversée")
+            elif la >= 6.0:
+                flags.append("lactate très élevé")
+            if p and prv and abs(prv - p) / p > 0.10:
+                flags.append("révision > 10 %")
+            if dur is not None and dur < 3:
+                flags.append("durée < 3'")
+            prev_la = la if la is not None else prev_la
+            r["_niveau"] = ("rouge" if ("FC ≥ FCmax" in flags
+                                        or "lactate très élevé" in flags)
+                            else "orange" if flags else "")
+            r["⚠️ Suspect"] = " · ".join(flags)
+        steps = [(r["P révisée (W)"] or r["P moy. (W)"],
+                  r["FC moy. (bpm)"] if r["FC moy. (bpm)"] is not None else np.nan,
+                  r["Lactate (mmol/L)"] if r["Lactate (mmol/L)"] is not None
+                  else np.nan) for r in paliers_raw]
+        s1, s2 = sv1(steps, method), sv2(steps)
+        p_sv1, hr_sv1 = s1 if s1 else (None, None)
+        p_sv2, hr_sv2 = s2 if s2 else (None, None)
+        zw = (zone_table(p_sv1, p_sv2) if p_sv1 and p_sv2
+              else zone_table_partial(p_sv1))
+        hr1_ok = hr_sv1 is not None and not (isinstance(hr_sv1, float)
+                                             and np.isnan(hr_sv1))
+        hr2_ok = hr_sv2 is not None and not (isinstance(hr_sv2, float)
+                                             and np.isnan(hr_sv2))
+        zh = (zone_table(hr_sv1, hr_sv2) if hr1_ok and hr2_ok
+              else zone_table_partial(hr_sv1 if hr1_ok else None))
+        revs = [r["P révisée (W)"] or r["P moy. (W)"] for r in paliers_raw]
+        wkgs = [r.get("W/kg") for r in paliers_raw if r.get("W/kg")]
+        las = [r["Lactate (mmol/L)"] for r in paliers_raw
+               if r["Lactate (mmol/L)"] is not None]
+        # Graphique : lactate + FC vs puissance révisée
+        fig = go.Figure()
+        xs = [r["P révisée (W)"] or r["P moy. (W)"] for r in paliers_raw]
+        fig.add_trace(go.Scatter(
+            x=xs, y=[r["Lactate (mmol/L)"] for r in paliers_raw],
+            mode="markers+lines", name="Lactate",
+            text=[f"Palier {r['Palier']}" for r in paliers_raw],
+            marker=dict(color="#dc2626", size=10),
+            line=dict(color="#dc2626"),
+            hovertemplate="%{text}<br>%{x:.0f} W · %{y:.1f} mmol/L<extra></extra>"))
+        fcs = [(r["P révisée (W)"] or r["P moy. (W)"], r["FC moy. (bpm)"])
+               for r in paliers_raw if r["FC moy. (bpm)"] is not None]
+        if fcs:
+            fig.add_trace(go.Scatter(
+                x=[f[0] for f in fcs], y=[f[1] for f in fcs],
+                mode="markers+lines", name="FC moy.", yaxis="y2",
+                marker=dict(color="#2563eb", size=8),
+                line=dict(color="#2563eb", dash="dot"),
+                hovertemplate="%{x:.0f} W · %{y:.0f} bpm<extra></extra>"))
+        if p_sv1:
+            fig.add_vline(x=p_sv1, line_dash="dash", line_color="#d97706",
+                          annotation_text=f"SV1 {p_sv1:.0f} W")
+        if p_sv2:
+            fig.add_vline(x=p_sv2, line_dash="dash", line_color="#dc2626",
+                          annotation_text=f"SV2 {p_sv2:.0f} W")
+        fig.update_layout(template="plotly_white", height=360,
+                          xaxis_title="Puissance révisée (W)",
+                          yaxis_title="Lactate (mmol/L)",
+                          yaxis2=dict(title="FC moy. (bpm)", overlaying="y",
+                                      side="right", range=[80, 230]),
+                          legend=dict(orientation="h", yanchor="bottom",
+                                      y=1.02, xanchor="right", x=1))
+        n_susp = sum(1 for r in paliers_raw if r["_niveau"])
+        return {"error": None, "group": grp, "date": str(ft.get("date") or ""),
+                "lieu": str(ft.get("lieu") or ""),
+                "fcmax": _num(ft.get("fcmax")), "poids": _num(ft.get("poids")),
+                "la_repos": _num(ft.get("la_repos")),
+                "n_pal": len(paliers_raw), "paliers": paliers_raw,
+                "p_sv1": p_sv1, "hr_sv1": hr_sv1, "p_sv2": p_sv2,
+                "hr_sv2": hr_sv2,
+                "wkg_sv1": (p_sv1 / (ft.get("poids") or 70.0)) if p_sv1 else None,
+                "wkg_sv2": (p_sv2 / (ft.get("poids") or 70.0)) if p_sv2 else None,
+                "p_rev_max": max(revs) if revs else None,
+                "wkg_max": max(wkgs) if wkgs else None,
+                "la_max": max(las) if las else None,
+                "zones_w": zw, "zones_hr": zh, "fig": fig, "n_suspects": n_susp}
 
-    disp = field_computed(fdf)
-    if disp.empty:
-        st.info("Ajoute une ligne (au moins un Nom) — puissance révisée, W/kg et contrôles "
-                "se calculent automatiquement.")
-    else:
-        def _paint(row):
-            color = ("#fee2e2" if row["_niveau"] == "rouge"
-                     else "#fef3c7" if row["_niveau"] else "")
-            return [f"background-color:{color}"] * len(row) if color else [""] * len(row)
+    st.subheader("🩸 Test lactate de terrain — paliers sur le même terrain")
+    st.caption(
+        "Protocole : échauffement, puis 3 à 6 paliers de même durée sur le même "
+        "terrain, en montant d'intensité à chaque palier (ex. 4 × 4′ de facile à "
+        "fort), repos ~2′ entre paliers, lactate prélevé juste après chaque palier, "
+        "FCmax relevée en fin de test. La puissance de chaque palier est révisée avec "
+        "la formule équipe (FC vs 80 % du FCmax), puis SV1/SV2 et les zones sont "
+        "calculées sur la puissance révisée. 🔴 suspect · 🟠 vigilance.")
 
-        st.dataframe(disp.style.apply(_paint, axis=1).hide(axis="index"),
+    fdata = st.session_state.setdefault("field_tests", {})
+    _fmeth = st.radio("Méthode SV1", list(SV1_METHODS.keys()),
+                      key="field_sv1_method", horizontal=True)
+
+    opts = list(sel) + [n for n in fdata if n not in sel]
+    field_rider = st.selectbox("Coureur à saisir / modifier", opts,
+                               key="field_rider")
+
+    ft = fdata.get(field_rider, {})
+    _pals_prev = ft.get("paliers")
+    if not isinstance(_pals_prev, pd.DataFrame) or _pals_prev.empty:
+        _pals_prev = pd.DataFrame({
+            "Durée (min)": [4.0, 4.0, 4.0, 4.0],
+            "P moy. (W)": [None] * 4, "FC moy. (bpm)": [None] * 4,
+            "Lactate (mmol/L)": [None] * 4, "RPE (/10)": [None] * 4})
+    try:
+        with st.form("field_form", clear_on_submit=False):
+            hc1, hc2, hc3, hc4, hc5 = st.columns(5)
+            f_date = hc1.text_input("Date", str(ft.get("date") or ""),
+                                    placeholder="JJ/MM/AAAA")
+            f_lieu = hc2.text_input("Lieu (montée utilisée)",
+                                    str(ft.get("lieu") or ""))
+            _fcmax_v = _num(ft.get("fcmax")) or 190
+            f_fcmax = hc3.number_input("FCmax (bpm)", 120, 230, int(_fcmax_v))
+            _kg_v = _num(ft.get("poids")) or weight_of(field_rider)
+            f_kg = hc4.number_input("Poids (kg)", 30.0, 120.0, float(_kg_v), 0.5)
+            _lrep_v = _num(ft.get("la_repos")) or 0.8
+            f_lrep = hc5.number_input("Lactate repos (mmol/L)", 0.0, 20.0,
+                                      float(_lrep_v), 0.1, format="%.1f")
+            st.markdown("**Paliers** — 1 ligne = 1 effort, de plus en plus fort. "
+                        "Ils sont triés par puissance pour l'analyse.")
+            pals = st.data_editor(
+                _pals_prev.reindex(columns=["Durée (min)", "P moy. (W)",
+                                            "FC moy. (bpm)", "Lactate (mmol/L)",
+                                            "RPE (/10)"]),
+                key=f"field_paliers_{abs(hash(field_rider)) % 10 ** 8}",
+                hide_index=True, use_container_width=True, num_rows="dynamic",
+                column_config={
+                    "Durée (min)": st.column_config.NumberColumn(
+                        "Durée (min)", min_value=0.0, max_value=120.0, step=0.5),
+                    "P moy. (W)": st.column_config.NumberColumn(
+                        "P moy. (W)", min_value=50, max_value=1200, step=1),
+                    "FC moy. (bpm)": st.column_config.NumberColumn(
+                        "FC moy. (bpm)", min_value=80, max_value=230, step=1),
+                    "Lactate (mmol/L)": st.column_config.NumberColumn(
+                        "Lactate (mmol/L)", min_value=0.0, max_value=20.0, step=0.1,
+                        format="%.1f"),
+                    "RPE (/10)": st.column_config.NumberColumn(
+                        "RPE (/10)", min_value=0.0, max_value=10.0, step=0.5,
+                        format="%.1f"),
+                })
+            saved_ft = st.form_submit_button(
+                f"💾 Enregistrer le test de {field_rider}")
+    except Exception:
+        st.warning("Tableau réinitialisé (état incompatible détecté).")
+        st.rerun()
+    if saved_ft:
+        fdata[field_rider] = {"date": f_date, "lieu": f_lieu, "fcmax": f_fcmax,
+                              "poids": f_kg, "la_repos": f_lrep,
+                              "paliers": pals,
+                              "group": group_of.get(field_rider, "—")}
+        st.session_state["field_report"] = {}
+        st.success(f"Test de {field_rider} enregistré — paliers triés par "
+                   "puissance pour l'analyse.")
+
+    _entered_f = [n for n in fdata if isinstance(fdata[n].get("paliers"),
+                                                 pd.DataFrame)]
+    if _entered_f:
+        _rem = st.multiselect("🗑️ Retirer des tests enregistrés", _entered_f,
+                              key="field_remove")
+        if st.button("♻️ Retirer ces tests", key="field_rm_btn") and _rem:
+            for _nm in _rem:
+                fdata.pop(_nm, None)
+            st.session_state["field_report"] = {}
+            st.rerun()
+
+    if st.button("📊 Générer les rapports — tous les tests saisis",
+                 type="primary", key="field_report_btn"):
+        st.session_state["field_report"] = {}
+        with st.spinner("Analyse de tous les tests…"):
+            for _n in _entered_f:
+                _ready = sum(1 for _, _r in fdata[_n]["paliers"].iterrows()
+                             if _num(_r.get("Lactate (mmol/L)")))
+                if _ready < 2:
+                    st.session_state["field_report"][_n] = {
+                        "error": "moins de 2 lactates saisis — seuils impossibles"}
+                else:
+                    st.session_state["field_report"][_n] = field_report_for(
+                        _n, fdata[_n], _fmeth)
+        st.rerun()
+
+    report = st.session_state.get("field_report", {})
+
+    if not _entered_f:
+        st.info("Enregistre le test d'un coureur ci-dessus (au moins 2 paliers "
+                "avec lactate), puis clic sur 📊 Générer les rapports.")
+        st.stop()
+
+    # ── Rapports individuels ─────────────────────────────────────────────
+    for _n in _entered_f:
+        rep = report.get(_n)
+        if rep is None:
+            st.markdown(f"#### {_n} — ⏳ clic sur 📊 Générer les rapports")
+            continue
+        if isinstance(rep, dict) and rep.get("error"):
+            st.markdown(f"#### {_n}")
+            st.warning(f"{_n} : {rep['error']}")
+            continue
+        with st.expander(
+                f"📋 Rapport — {_n} · {rep['group']} · {rep['date'] or 'sans date'}"
+                f" · {rep['lieu'] or 'sans lieu'}", expanded=True):
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("SV1", _fmt(rep["p_sv1"], 0, " W"),
+                      _fmt(rep["hr_sv1"], 0, " bpm"))
+            k2.metric("SV2", _fmt(rep["p_sv2"], 0, " W"),
+                      _fmt(rep["hr_sv2"], 0, " bpm"))
+            k3.metric("SV1 W/kg", _fmt(rep["wkg_sv1"], 2, " W/kg"),
+                      f"{rep['la_max']:.1f} mmol max" if rep["la_max"] else None)
+            k4.metric("P max test", _fmt(rep["p_rev_max"], 0, " W"),
+                      _fmt(rep["wkg_max"], 2, " W/kg"))
+            dfv = pd.DataFrame(rep["paliers"])
+            st.dataframe(dfv.style.apply(_palette, axis=1).hide(axis="index"),
+                         use_container_width=True)
+            if rep["zones_w"]:
+                zl, zr = st.columns(2)
+                zl.markdown("**Zones puissance (puissance révisée)**")
+                zl.dataframe(pd.DataFrame(
+                    [{"Zone": lbl,
+                      "De (W)": "—" if b is None else round(b),
+                      "À (W)": "—" if h is None else round(h)}
+                     for lbl, b, h in rep["zones_w"]]),
+                    hide_index=True, use_container_width=True)
+                zr.markdown("**Zones fréquence cardiaque**")
+                if rep["zones_hr"]:
+                    zr.dataframe(pd.DataFrame(
+                        [{"Zone": lbl,
+                          "De (bpm)": "—" if b is None else round(b),
+                          "À (bpm)": "—" if h is None else round(h)}
+                         for lbl, b, h in rep["zones_hr"]]),
+                        hide_index=True, use_container_width=True)
+                else:
+                    zr.info("FC manquantes aux paliers — zones FC indisponibles.")
+            else:
+                st.info("Seuils incomplets — complète les lactates ou ajuste "
+                        "FCmax/poids, puis regénère les rapports.")
+            if rep["fig"] is not None:
+                st.plotly_chart(rep["fig"], use_container_width=True)
+    st.caption("Revoir un test : sélectionne le coureur en haut, modifie les "
+               "paliers, enregistre, puis regénère les rapports.")
+
+    # ── Vue groupe ───────────────────────────────────────────────────────
+    ok_reports = {n: r for n, r in report.items()
+                  if isinstance(r, dict) and not r.get("error")}
+    if ok_reports:
+        st.subheader("Vue groupe — puissance révisée aux seuils")
+        cmp_rows = [{"Coureur": n, "Groupe": rep["group"], "Paliers": rep["n_pal"],
+                     "P@SV1 (W)": _round0(rep["p_sv1"]),
+                     "W/kg@SV1": _round2(rep["wkg_sv1"]),
+                     "P@SV2 (W)": _round0(rep["p_sv2"]),
+                     "W/kg@SV2": _round2(rep["wkg_sv2"]),
+                     "P max (W)": _round0(rep["p_rev_max"]),
+                     "W/kg max": _round2(rep["wkg_max"]),
+                     "Lact. max": _round1(rep["la_max"]),
+                     "Suspects": rep["n_suspects"]}
+                    for n, rep in ok_reports.items()]
+        st.dataframe(pd.DataFrame(cmp_rows), hide_index=True,
                      use_container_width=True)
+        zz1, zz2 = st.columns(2)
+        zz1.dataframe(pd.DataFrame(
+            [{"Coureur": n,
+              "Z1 max": round(rep["zones_w"][0][2])
+              if rep["zones_w"] and len(rep["zones_w"][0]) > 2
+              and rep["zones_w"][0][2] else None,
+              "Z2 → Z3": round((rep["zones_w"][1][1] + rep["zones_w"][1][2]) / 2)
+              if rep["zones_w"] else None,
+              "Z3 → Z4": round((rep["zones_w"][2][1] + rep["zones_w"][2][2]) / 2)
+              if rep["zones_w"] else None,
+              "Z4 base": round(rep["zones_w"][3][1])
+              if rep["zones_w"] else None}
+             for n, rep in ok_reports.items()]),
+            hide_index=True, use_container_width=True)
+        zz1.caption("Résumé des zones (W révisée) : haut de Z1, milieu Z2→Z3, "
+                    "milieu Z3→Z4, base Z4.")
+        zz2.dataframe(pd.DataFrame(
+            [{"Coureur": n, "Groupe": rep["group"], "Seuil": se,
+              "W (révisée)": round(pv),
+              "W/kg": round(pv / (rep["poids"] or 70), 2)}
+             for n, rep in ok_reports.items()
+             for se, pv in (("SV1", rep["p_sv1"]), ("SV2", rep["p_sv2"]),
+                            ("P max", rep["p_rev_max"])) if pv]),
+            hide_index=True, use_container_width=True)
+        zz2.caption("Cibles seuils par coureur.")
 
-        st.subheader("W/kg vs durée — par groupe")
-        grp_filter = st.selectbox("Groupe affiché", ["Tous les groupes"] + GROUPS,
-                                  key="field_grp")
-        plot_df = disp[disp["W/kg (révisée)"].notna() & disp["Durée (min)"].notna()]
-        if grp_filter != "Tous les groupes":
-            plot_df = plot_df[plot_df["Groupe"] == grp_filter]
-        if plot_df.empty:
-            st.info("Renseigne durée, puissance, FCmax et poids pour alimenter le graphe.")
-        else:
-            GROUP_COLORS = {"WT Hommes": "#dc2626", "WT Femmes": "#db2777",
-                            "Conti Hommes": "#2563eb", "Conti Femmes": "#16a34a"}
-            fig = go.Figure()
-            for g in sorted(plot_df["Groupe"].unique()):
-                sub = plot_df[plot_df["Groupe"] == g]
-                symbols = ["diamond-open" if s else "circle"
-                           for s in sub["⚠️ Suspect"].astype(bool)]
-                fig.add_trace(go.Scatter(
-                    x=sub["Durée (min)"], y=sub["W/kg (révisée)"],
-                    mode="markers+text", name=g, text=sub["Nom"],
-                    textposition="top center",
-                    marker=dict(size=11,
-                                color=GROUP_COLORS.get(g, "#64748b"),
-                                symbol=symbols),
-                    customdata=sub["⚠️ Suspect"],
-                    hovertemplate="%{text}<br>%{x:.0f} min · %{y:.2f} W/kg"
-                                  "<extra>%{customdata}</extra>"))
-            fig.update_layout(template="plotly_white", height=380,
-                              xaxis_title="Durée (min)", yaxis_title="W/kg (puissance révisée)",
-                              legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                          xanchor="right", x=1))
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption("Losange ouvert = perf suspecte.")
+        grp_sel_f = st.selectbox("Groupe affiché",
+                                 ["Tous les groupes"] + GROUPS,
+                                 key="field_rep_grp")
+        GROUP_COLORS = {"WT Hommes": "#dc2626", "WT Femmes": "#db2777",
+                        "Conti Hommes": "#2563eb", "Conti Femmes": "#16a34a"}
+        figg = go.Figure()
+        for _n, rep in ok_reports.items():
+            if grp_sel_f != "Tous les groupes" and rep["group"] != grp_sel_f:
+                continue
+            pts_ok = [(p["Durée (min)"], p["W/kg"]) for p in rep["paliers"]
+                      if p.get("W/kg") and p["Durée (min)"]]
+            if not pts_ok:
+                continue
+            lvl = ("suspect"
+                   if any(p["_niveau"] == "rouge" for p in rep["paliers"])
+                   else ("vigilance"
+                         if any(p["_niveau"] for p in rep["paliers"]) else "ok"))
+            figg.add_trace(go.Scatter(
+                x=[p[0] for p in pts_ok], y=[p[1] for p in pts_ok],
+                mode="markers+lines", name=_n,
+                marker=dict(color=GROUP_COLORS.get(rep["group"], "#64748b"),
+                            symbol="diamond-open" if lvl != "ok" else "circle",
+                            size=10),
+                line=dict(color=GROUP_COLORS.get(rep["group"], "#64748b")),
+                customdata=[rep["group"]] * len(pts_ok),
+                hovertemplate=f"{_n}<br>%{{x:.1f}}′ · %{{y:.2f}} W/kg"
+                              "<extra>%{customdata}</extra>"))
+        figg.update_layout(template="plotly_white", height=380,
+                           xaxis_title="Durée du palier (min)",
+                           yaxis_title="W/kg (puissance révisée)",
+                           legend=dict(orientation="h", yanchor="bottom",
+                                       y=1.02, xanchor="right", x=1))
+        if len(figg.data):
+            st.plotly_chart(figg, use_container_width=True)
+            st.caption("Losange ouvert = rapport avec suspect(s).")
 
-        exp_rows = disp.drop(columns=["_niveau"])
-        st.download_button("⬇️ Collecte test de terrain (CSV)",
-                           exp_rows.to_csv(index=False, sep=";", decimal=",")
-                           .encode("utf-8-sig"),
-                           "collecte_test_terrain.csv", "text/csv")
-
-
+        lon_rows = [{"Coureur": _n, "Groupe": rep["group"], "Date": rep["date"],
+                     "Lieu": rep["lieu"], "FCmax": rep["fcmax"],
+                     "Poids": rep["poids"], "Lactate repos": rep["la_repos"],
+                     "Palier": p["Palier"], "Durée (min)": p["Durée (min)"],
+                     "P moy. (W)": p["P moy. (W)"],
+                     "FC moy. (bpm)": p["FC moy. (bpm)"],
+                     "Lactate (mmol/L)": p["Lactate (mmol/L)"], "RPE": p["RPE"],
+                     "P révisée (W)": _round0(p["P révisée (W)"]),
+                     "W/kg (révisée)": p.get("W/kg"),
+                     "⚠️ Suspect": p["⚠️ Suspect"]}
+                    for _n, rep in ok_reports.items()
+                    for p in rep["paliers"]]
+        st.download_button("⬇️ Tests terrain — tous les paliers (CSV)",
+                           pd.DataFrame(lon_rows).to_csv(index=False, sep=";",
+                                                         decimal=",")
+                           .encode("utf-8-sig"), "tests_lactate_terrain.csv",
+                           "text/csv", key="field_csv_long")
 # ═══════════════════════════════ TEST 5' & 20' — CP ═══════════════════════════════
 elif tool == "cp":
     st.subheader("Test 5′ & 20′ à bloc — CP et zones d'entraînement")
