@@ -68,7 +68,8 @@ with t_sim:
             pts = parse_course(up.getvalue(), up.name)
             segs = build_segments(pts)
             total_km = segs["dist_m"].sum() / 1000.0
-            dplus = float(np.clip(segs["gradient_pct"], 0, None).mul(segs["dist_m"]).sum() / 1000.0)
+            dplus = float((np.clip(segs["gradient_pct"], 0, None) / 100.0)
+                          .mul(segs["dist_m"]).sum())
             c1, c2, c3 = st.columns(3)
             c1.metric("Distance", f"{total_km:.1f} km")
             c2.metric("D+", f"{dplus:.0f} m")

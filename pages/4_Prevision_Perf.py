@@ -119,7 +119,8 @@ st.caption(f"🔍 Lecture du fichier : **{len(points)} points** · **{len(segs)}
 lats = [p["lat"] for p in points if p["lat"] is not None]
 lons = [p["lon"] for p in points if p["lon"] is not None]
 center = (float(np.mean(lats)), float(np.mean(lons))) if lats else None
-dplus = float(np.clip(segs["gradient_pct"], 0, None).mul(segs["dist_m"], axis=0).sum() / 1000.0)
+dplus = float((np.clip(segs["gradient_pct"], 0, None) / 100.0)
+              .mul(segs["dist_m"], axis=0).sum())
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Distance", f"{total_km:.1f} km")

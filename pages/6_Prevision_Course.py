@@ -223,8 +223,8 @@ if "race_climb_rows" not in st.session_state or \
     st.session_state["race_climb_src"] = race_name
 
 total_km = segs["dist_m"].sum() / 1000.0
-dplus = float(np.clip(segs["gradient_pct"], 0, None).mul(segs["dist_m"], axis=0)
-              .sum() / 1000.0)
+dplus = float((np.clip(segs["gradient_pct"], 0, None) / 100.0)
+              .mul(segs["dist_m"], axis=0).sum())
 c1, c2, c3 = st.columns(3)
 c1.metric("Distance", f"{total_km:.1f} km")
 c2.metric("D+", f"{dplus:.0f} m")
@@ -252,7 +252,9 @@ def _zone_stats(km0, km1):
     dist_km = float(km1 - km0)
     if z.empty:
         return None
-    up_m = float(np.clip(z["gradient_pct"], 0, None).mul(z["dist_m"]).sum())
+    # pente en % -> mètres grimpés = ∑ (g/100) × dist ; sans /100 on raconterait ×100
+    up_m = float((np.clip(z["gradient_pct"], 0, None) / 100.0)
+                 .mul(z["dist_m"]).sum())
     up_rows = z[z["gradient_pct"] >= 1.0]
     up_km = float(up_rows["dist_m"].sum() / 1000.0) if len(up_rows) else 0.0
     up_grad = (float(np.average(up_rows["gradient_pct"], weights=up_rows["dist_m"]))
@@ -731,11 +733,30 @@ if not climb_list:
                "dans le tableau.")
     st.stop()
 
+def _num_or(v, fb):
+    """Nombre fiable : None/NaN/texte non convertible -> valeur de repli.
+    Le data_editor renvoie None sur les cellules vides d'une ligne ajoutée
+    à la main — c'était la cause du TypeError float(None) sur le Cloud."""
+    try:
+        if v is None or (isinstance(v, float) and v != v):
+            return float(fb)
+        return float(v)
+    except (TypeError, ValueError):
+        return float(fb)
+
+
 def _one_plan(row, pace=None):
-    rider = {"cp": float(row["CP (W)"]), "wprime": float(row["W′ (kJ)"]) * 1000.0,
-             "mass_total": float(row["Poids (kg)"]) + BIKE_KG}
-    return {"role": str(row["Rôle"]), "kg": float(row["Poids (kg)"]),
-            **race_plan(climb_list, rest_km, grad_rest, rider, str(row["Rôle"]),
+    n = str(row.get("Coureur") or "").strip()
+    fb_cp, fb_wp, _ = _model_of(n) if n else (320.0, 21.0, "")
+    role = str(row.get("Rôle") or "").strip()
+    if role not in ROLES:
+        role = "Coéquipier"
+    kg = min(max(_num_or(row.get("Poids (kg)"), 70.0), 40.0), 110.0)
+    cp = min(max(_num_or(row.get("CP (W)"), fb_cp), 150.0), 700.0)
+    wp = min(max(_num_or(row.get("W′ (kJ)"), fb_wp), 4.0), 40.0)
+    rider = {"cp": cp, "wprime": wp * 1000.0, "mass_total": kg + BIKE_KG}
+    return {"role": role, "kg": kg,
+            **race_plan(climb_list, rest_km, grad_rest, rider, role,
                         scenario, rho, wind_ms=0.0, fatigue_pct=fatigue,
                         records=_records_used(leader_mode),
                         leader_record=(leader_mode != "Max (modèle CP)"),
@@ -747,8 +768,10 @@ def _one_plan(row, pace=None):
 # plafonnés à leur CP — un effort de 2 min reste court, pas un sprint forcé).
 plans = {}
 for _, row in rodf.iterrows():
-    if str(row["Coureur"]).strip() and str(row["Rôle"]) == "Leader":
-        plans[str(row["Coureur"])] = _one_plan(row)
+    _nm = str(row.get("Coureur") or "").strip()
+    if _nm.lower() not in ("", "nan", "none") and \
+            str(row.get("Rôle") or "") == "Leader":
+        plans[_nm] = _one_plan(row)
 leads = [n for n, pl in plans.items() if pl["role"] == "Leader"]
 ref_t = None
 if leads:
@@ -756,9 +779,13 @@ if leads:
                  if i < len(plans[n]["climbs"]))
              for i in range(len(climb_list))]
 for _, row in rodf.iterrows():
-    n = str(row["Coureur"]).strip()
-    if n and str(row["Rôle"]) != "Leader":
+    n = str(row.get("Coureur") or "").strip()
+    if n and str(row.get("Rôle") or "") != "Leader":
         plans[n] = _one_plan(row, pace=ref_t)
+
+if not plans:
+    st.warning("Aucun coureur exploitable — vérifie le tableau rôles \ns\n(au moins un nom + une valeur CP).")
+    st.stop()
 
 winner_s = _parse_rec(winner_txt) or min(p["total_s"] for p in plans.values())
 cut_s = winner_s * (1.0 + delai / 100.0)
