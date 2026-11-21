@@ -119,12 +119,15 @@ class StravaClient:
             "bounds": f"{south},{west},{north},{east}"})
         return out.get("segments", [])
 
-    def leaderboard_kom(self, segment_id: int):
+    def leaderboard_kom(self, segment_id: int, sex: str = None):
         """(secondes, nom de l'athlète, date ISO) du record du segment,
-        ou None si pas de classement accessible."""
+        ou None si pas de classement accessible. sex = "M" ou "F" filtre
+        le classement par genre (équipe hommes + femmes)."""
         try:
-            lb = self._get(f"segments/{segment_id}/leaderboard",
-                           {"per_page": 1})
+            params = {"per_page": 1}
+            if sex in ("M", "F"):
+                params["gender"] = sex
+            lb = self._get(f"segments/{segment_id}/leaderboard", params)
         except StravaError:
             return None
         entries = lb.get("entries", [])

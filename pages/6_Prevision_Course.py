@@ -219,7 +219,7 @@ if "race_climb_rows" not in st.session_state or \
     st.session_state["race_climb_rows"] = pd.DataFrame(
         [{"km": c["start_km"], "Longueur (km)": c["len_km"],
           "Pente (%)": c["grad_pct"], "D+ (m)": c["dplus_m"],
-          "Nom / Strava": "", "Record": ""} for c in climbs0])
+          "Nom / Strava": "", "Record": "", "Record F": ""} for c in climbs0])
     st.session_state["race_climb_src"] = race_name
 
 total_km = segs["dist_m"].sum() / 1000.0
@@ -315,24 +315,44 @@ try:
                 "Nom / Strava": st.column_config.TextColumn("Nom / Strava"),
                 "Record": st.column_config.TextColumn("Record (mm:ss)",
                                                       help="« 24:35 », « 1:02:40 » "
-                                                           "ou « 24,6 » (minutes)"),
+                                                           "ou « 24,6 » (minutes)"
+                                                           " — record hommes"),
+                "Record F": st.column_config.TextColumn(
+                    "Record F (mm:ss)",
+                    help="Record femmes (même format) — rempli par la reco "
+                         "Strava si « Femmes » ou « Les deux ».",
+                ),
             })
         cdf = st.form_submit_button("💾 Enregistrer montées & records")
 except Exception:
     st.session_state["race_climb_rows"] = pd.DataFrame(
         [{"km": None, "Longueur (km)": None, "Pente (%)": None, "D+ (m)": None,
-          "Nom / Strava": "", "Record": ""}])
+          "Nom / Strava": "", "Record": "", "Record F": ""}])
     st.warning("Tableau réinitialisé (état incompatible détecté).")
     st.rerun()
 if cdf:
     st.session_state["race_climb_rows"] = cdf
 
+_dfc = st.session_state["race_climb_rows"]
+if "Record F" not in _dfc.columns:
+    _dfc["Record F"] = ""
 climb_rows = st.session_state["race_climb_rows"].dropna(
     subset=["km", "Longueur (km)", "Pente (%)"])
 climb_rows = climb_rows[climb_rows["Pente (%)"] > 0].sort_values("km")
 climb_list = [(float(r["km"]), float(r["Longueur (km)"]), float(r["Pente (%)"]))
               for _, r in climb_rows.iterrows()]
-records = [_parse_rec(r["Record"]) for _, r in climb_rows.iterrows()]
+records_h = [_parse_rec(r["Record"]) for _, r in climb_rows.iterrows()]
+records_f = ([_parse_rec(r["Record F"])
+              for _, r in climb_rows.iterrows()]
+             if "Record F" in climb_rows.columns else [None] * len(climb_rows))
+
+
+def _records_used(lm):
+    """Colonne de records retenue pour les leaders (H par défaut)."""
+    if lm == "Records F" and any(records_f):
+        return records_f
+    return records_h
+
 rest_km = max(total_km - sum(l for _, l, _ in climb_list), 0.0)
 grad_rest = float(
     np.average(np.clip(segs["gradient_pct"], -1.5, 2.0),
@@ -395,6 +415,15 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
 
         _sv = st.session_state.get("race_strava")
         if _sv and _sv.get("sig") == race_name and _sv.get("segments"):
+            _sx = st.radio("🎯 Records à relever", ["Hommes", "Femmes", "Les deux"],
+                           horizontal=True, key="race_strava_sex",
+                           help="Classement Strava filtré par genre — l'équipe "
+                                "compte hommes et femmes. « Les deux » remplit "
+                                "les colonnes Record (H) et Record F.")
+            _kinds = ({"Hommes": [("M", "Record")],
+                       "Femmes": [("F", "Record F")],
+                       "Les deux": [("M", "Record"), ("F", "Record F")]}
+                      .get(_sx, [("M", "Record")]))
             _kom = st.session_state.get("race_strava_kom", {}) or {}
             if st.button("⏱️ Charger les meilleurs temps (KOM)",
                          key="race_strava_kom_btn"):
@@ -404,9 +433,10 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                     _pbk = st.progress(0.0, text="Relevé des KOM…")
                     _tgt = _sv["segments"][:60]
                     for _i, _s in enumerate(_tgt):
-                        _r = _cl.leaderboard_kom(_s["id"])
-                        if _r and _r.get("time_s"):
-                            _kk[_s["id"]] = _r
+                        for _g, _col in _kinds:
+                            _r = _cl.leaderboard_kom(_s["id"], sex=_g)
+                            if _r and _r.get("time_s"):
+                                _kk.setdefault(_s["id"], {})[_g] = _r
                         _pbk.progress((_i + 1) / len(_tgt))
                     st.session_state["race_strava_kom"] = _kk
                     st.rerun()
@@ -415,15 +445,18 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
 
             _rows = []
             for _s in _sv["segments"]:
-                _r = _kom.get(_s["id"])
+                _rr = _kom.get(_s["id"]) or {}
+                _rm, _rf = _rr.get("M"), _rr.get("F")
+                _rv = _rm or _rf
                 _rows.append({
                     "km": _s["km"], "Nom": _s["name"],
                     "Long. (km)": round(_s["len_m"] / 1000.0, 2),
                     "Pente (%)": _s["avg_grade"], "D+ (m)": round(_s["dplus"]),
-                    "Record": _fmt_rec(_r["time_s"]) if _r else "—",
+                    "Record (H)": _fmt_rec(_rm["time_s"]) if _rm else "—",
+                    "Record (F)": _fmt_rec(_rf["time_s"]) if _rf else "—",
                     "Vitesse rec. (km/h)": round(
-                        _s["len_m"] / _r["time_s"] * 3.6, 1)
-                    if _r and _r.get("time_s") else None})
+                        _s["len_m"] / _rv["time_s"] * 3.6, 1)
+                    if _rv and _rv.get("time_s") else None})
             _sdf = pd.DataFrame(_rows)
             st.data_editor(_sdf, key="race_strava_ed", hide_index=True,
                            use_container_width=True,
@@ -452,10 +485,14 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
             if _nb_c and st.button("✨ Remplir tous les records automatiquement",
                                    key="race_strava_fill_all",
                                    help="Pour chaque montée : prend la meilleure "
-                                        "candidate détectée et relève son KOM."):
+                                        "candidate détectée et relève son KOM "
+                                        "(hommes et/ou femmes selon le choix "
+                                        "ci-dessus)."):
                 try:
                     _cl = strava_api.StravaClient(**strava_api.credentials())
                     _df = st.session_state["race_climb_rows"].copy()
+                    if "Record F" not in _df.columns:
+                        _df["Record F"] = ""
                     _kk = dict(st.session_state.get("race_strava_kom", {}) or {})
                     _n = 0
                     for _j, (_ridx, _r) in enumerate(_srows):
@@ -463,12 +500,13 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                         if not _cands:
                             continue
                         _sg = _cands[0]
-                        _rec = _cl.leaderboard_kom(_sg["id"])
-                        if _rec and _rec.get("time_s"):
-                            _df.loc[_ridx, "Nom / Strava"] = _sg["name"]
-                            _df.loc[_ridx, "Record"] = _fmt_rec(_rec["time_s"])
-                            _kk[_sg["id"]] = _rec
-                            _n += 1
+                        for _g, _col in _kinds:
+                            _rec = _cl.leaderboard_kom(_sg["id"], sex=_g)
+                            if _rec and _rec.get("time_s"):
+                                _df.loc[_ridx, "Nom / Strava"] = _sg["name"]
+                                _df.loc[_ridx, _col] = _fmt_rec(_rec["time_s"])
+                                _kk.setdefault(_sg["id"], {})[_g] = _rec
+                                _n += 1
                     st.session_state["race_strava_kom"] = _kk
                     st.session_state["race_climb_rows"] = _df
                     st.session_state["race_climb_ver"] = \
@@ -487,12 +525,15 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                     continue
                 _lbls = ["—"]
                 for _c in _cands:
-                    _rec = _kom.get(_c["id"])
+                    _rr = _kom.get(_c["id"]) or {}
+                    _rm, _rf = _rr.get("M"), _rr.get("F")
                     _lbls.append(
                         f'{_c["name"]} ({_c["len_m"] / 1000.0:.2f} km, '
                         f'{_c["avg_grade"]:.1f} %)'
-                        + (f' — KOM {_fmt_rec(_rec["time_s"])}'
-                           if _rec and _rec.get("time_s") else ""))
+                        + (f' — KOM H {_fmt_rec(_rm["time_s"])}'
+                           if _rm and _rm.get("time_s") else "")
+                        + (f' · KOM F {_fmt_rec(_rf["time_s"])}'
+                           if _rf and _rf.get("time_s") else ""))
                 _pick = st.selectbox(
                     f'{_r["km"]:.1f} km · {_r["Longueur (km)"]:.2f} km @ '
                     f'{_r["Pente (%)"]:.1f} %',
@@ -504,13 +545,19 @@ with st.expander("🛰️ Reco Strava — segments de l'étape & records automat
                 try:
                     _cl = strava_api.StravaClient(**strava_api.credentials())
                     _df = st.session_state["race_climb_rows"].copy()
+                    if "Record F" not in _df.columns:
+                        _df["Record F"] = ""
+                    _kkk = dict(st.session_state.get("race_strava_kom", {}) or {})
                     _n = 0
                     for _ridx, _sg in _picks.items():
-                        _r = _cl.leaderboard_kom(_sg["id"])
-                        if _r and _r.get("time_s"):
-                            _df.loc[_ridx, "Nom / Strava"] = _sg["name"]
-                            _df.loc[_ridx, "Record"] = _fmt_rec(_r["time_s"])
-                            _n += 1
+                        for _g, _col in _kinds:
+                            _r = _cl.leaderboard_kom(_sg["id"], sex=_g)
+                            if _r and _r.get("time_s"):
+                                _df.loc[_ridx, "Nom / Strava"] = _sg["name"]
+                                _df.loc[_ridx, _col] = _fmt_rec(_r["time_s"])
+                                _kkk.setdefault(_sg["id"], {})[_g] = _r
+                                _n += 1
+                    st.session_state["race_strava_kom"] = _kkk
                     st.session_state["race_climb_rows"] = _df
                     st.session_state["race_climb_ver"] = \
                         st.session_state.get("race_climb_ver", 0) + 1
@@ -611,10 +658,14 @@ winner_txt = p3.text_input("Temps gagnant à toi de fixer (h:mm:ss) — optionne
 scx = p4.number_input("SCx moyen (m²)", 0.15, 0.40, 0.22, 0.005, key="race_scx")
 p5, p6, p7 = st.columns(3)
 temp_c = p5.number_input("Température (°C)", -5, 40, 18, 1, key="race_temp")
-leader_mode = p6.radio("Objectif leader", ["Max (modèle CP)", "Records saisis"],
+_lm_opts = ["Max (modèle CP)", "Records H", "Records F"]
+if st.session_state.get("race_lmode") not in _lm_opts:
+    st.session_state.pop("race_lmode", None)
+leader_mode = p6.radio("Objectif leader", _lm_opts,
                        horizontal=True, key="race_lmode",
-                       help="« Records saisis » : les leaders visent les temps "
-                            "relevés (Strava/KOM) ci-dessus.")
+                       help="« Records H / F » : les leaders visent les temps "
+                            "relevés (Strava/KOM) de la colonne Record (H) ou "
+                            "Record F du tableau 2.")
 fatigue = p7.number_input("Fatigue leader (% de perf en moins)", 0, 25, 0, 1,
                           key="race_fat",
                           help="Perf sur record avec de la km dans les jambes : "
@@ -637,8 +688,8 @@ for _, row in rodf.iterrows():
     plans[n] = {"role": str(row["Rôle"]), "kg": float(row["Poids (kg)"]),
                 **race_plan(climb_list, rest_km, grad_rest, rider, str(row["Rôle"]),
                             scenario, rho, wind_ms=0.0, fatigue_pct=fatigue,
-                            records=records,
-                            leader_record=(leader_mode == "Records saisis"))}
+                            records=_records_used(leader_mode),
+                            leader_record=(leader_mode != "Max (modèle CP)"))}
 
 winner_s = _parse_rec(winner_txt) or min(p["total_s"] for p in plans.values())
 cut_s = winner_s * (1.0 + delai / 100.0)
@@ -684,7 +735,7 @@ if not sum_df.empty and plans:
 climb_tab_rows = []
 for i, (km0, ln, gr) in enumerate(climb_list):
     row = {"km": km0, "Longueur (km)": ln, "Pente (%)": gr,
-           "Record": _hms(records[i]) if records[i] else "—"}
+           "Record": _hms(records_h[i]) if records_h[i] else "—"}
     for n, pl in plans.items():
         if i < len(pl["climbs"]):
             cd = pl["climbs"][i]
@@ -771,7 +822,7 @@ def _global_html():
     crs = "".join(
         f"<tr><td>{_esc(f'{km0:.1f} km')}</td><td>{_esc(f'{ln:.2f} km')}</td>"
         f"<td>{_esc(f'{gr:.1f} %')}</td>"
-        f"<td>{_esc(_hms(records[i]) if records[i] else '—')}</td></tr>"
+        f"<td>{_esc(_hms(records_h[i]) if records_h[i] else '—')}</td></tr>"
         for i, (km0, ln, gr) in enumerate(climb_list))
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
     body{{font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#111;background:#fff;margin:24px}}

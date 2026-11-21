@@ -21,7 +21,7 @@ core/
   course.py               GPX/FIT, segments, météo Open-Meteo, pacing
   raceplan.py             Plan de course : montées, délais, kJ, glucides g/h
   strava.py               Reco d'étape : segments Strava le long du parcours,
-                          records (KOM) automatiques, rattachement aux montées
+                          records (KOM) hommes/femmes, rattachement aux montées
 pages/
   1_Fiche_Coureur.py      Page par coureur : métriques + analyse IA complète
   2_Plannif_Annuel.py     Calendrier par coureur, blocs, coach IA, sauvegarde chiffrée
