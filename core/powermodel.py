@@ -213,11 +213,31 @@ CP_ZONE_PCTS = [("Z1 · Récupération", None, 0.55),
                 ("Z6 · Anaérobie", 1.20, None)]
 
 
-def cp_zone_table(cp):
-    """6 zones classiques en % CP : [(label, bas, haut)] (haut None = ouvert)."""
+def cp_zone_table(cp, pcts=None):
+    """6 zones en % CP : [(label, bas, haut)] (haut None = ouvert).
+    pcts : liste alternative de (label, bas, haut) — % réglés à la main."""
     if not cp or cp <= 0:
         return None
     return [(label,
              lo * cp if lo is not None else None,
              hi * cp if hi is not None else None)
-            for label, lo, hi in CP_ZONE_PCTS]
+            for label, lo, hi in (pcts or CP_ZONE_PCTS)]
+
+
+FC_ZONE_PCTS = [("Z1 · Récupération", None, 0.85),
+                ("Z2 · Endurance", 0.85, 0.90),
+                ("Z3 · Tempo", 0.90, 0.95),
+                ("Z4 · Seuil", 0.95, 1.00),
+                ("Z5 · VO2max", 1.00, 1.05),
+                ("Z6 · Anaérobie", 1.05, None)]
+
+
+def fc_zone_table(fc_ref, pcts=None):
+    """Zones FC en % de la FC de référence (FC seuil ≈ FC moy. 20′,
+    ou FCmax si connue). pcts : liste alternative réglée à la main."""
+    if not fc_ref or fc_ref <= 0:
+        return None
+    return [(label,
+             lo * fc_ref if lo is not None else None,
+             hi * fc_ref if hi is not None else None)
+            for label, lo, hi in (pcts or FC_ZONE_PCTS)]
