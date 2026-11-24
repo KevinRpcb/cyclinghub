@@ -221,6 +221,14 @@ TOOLS = {
     "cp": ("⏱️ 5′ & 20′ CP",
            "Deux efforts à bloc → CP/W′ à 2 points, 6 zones d'entraînement",
            "En usage"),
+    "cp3": ("⚡ 3′ all-out — CP & W′",
+            "Un seul effort de 3 min à bloc → CP des 30 dernières secondes, "
+            "W′ du travail au-dessus, contrôle du 5′/20′",
+            "En usage"),
+    "sprint": ("🌀 Sprints & RSA",
+               "Sprints max (3–5 × ~10 s) : pic 1″/5″, usure, ratio vs CP · "
+               "RSA (10 × 6 s / 30 s) : capacité à répéter (S_dec)",
+               "En usage"),
 }
 
 tool = st.session_state.get("test_tool", "")
@@ -1698,3 +1706,497 @@ elif tool == "cp":
                            cdisp.drop(columns=["_niveau"]).to_csv(
                                index=False, sep=";", decimal=",").encode("utf-8-sig"),
                            "test_5_20_cp.csv", "text/csv")
+
+
+# ═════════════════════════ TEST 3′ ALL-OUT — CP & W′ ═════════════════════════
+elif tool == "cp3":
+
+    def _cp_of(n):
+        """CP d'un coureur : 1) outil 5'/20' en session ; 2) profil de la fiche."""
+        cdf = st.session_state.get("cp_collect")
+        if isinstance(cdf, pd.DataFrame) and not cdf.empty and "Nom" in cdf.columns:
+            _m = cdf[cdf["Nom"].astype(str).str.strip() == str(n)]
+            if not _m.empty:
+                _c = _num(_m.iloc[0].get("CP (W)"))
+                if _c:
+                    return _c, "test 5′/20′"
+        nr = rider_by_name.get(n, {})
+        _c = _num(nr.get("cp")) or _num(nr.get("p60m"))
+        return (_c, "profil fiche") if _c else (None, "—")
+
+    with st.expander("❓ Le test 3′ all-out — en 40 secondes"):
+        st.markdown(
+            "**Le principe.** Un seul effort : 3 minutes à bloc, départ quasi "
+            "arrêté (plat ou petite côte, braquet chose). Dans les dernières "
+            "secondes, le coureur tourne sur son moteur d'endurance : la puissance "
+            "des **30 dernières secondes est sa CP** (puissance critique). Le "
+            "travail fourni AU-DESSUS de cette CP pendant les 3 min donne la "
+            "**W′** (le réservoir au-delà du seuil, en kJ).")
+        st.markdown(
+            "**À quoi ça sert.** Contrôler le 5′/20′ sans refaire deux efforts "
+            "durs : si la CP 3′ diverge de la CP 5′/20′, un des deux tests "
+            "n'était pas à bloc (ou le coureur était fatigué, ou le 20′ était "
+            "fractionné/venté). Une CP validée alimente la fiche, les prévisions "
+            "et toutes les zones.")
+        st.markdown(
+            "**Un bon test d'abord.** Départ FRANC : la tranche 0–30 s doit "
+            "dépasser ~115 % de la CP finale (sinon W′ sous-estimée). Plateau : "
+            "les tranches 150–180 s et 120–150 s quasi identiques (±5 %). "
+            "Sur le terrain : coureur motivé, compteur avec puissance, note les "
+            "6 tranches de 30 s juste après l'arrêt du coureur.")
+
+    try:
+        cp3_rider = st.pills("Coureur — un clic", sel, key="cp3_rider",
+                             default=[sel[0]],
+                             help="Un coureur à la fois — les données déjà "
+                                  "enregistrées sont reprises.")
+    except Exception:
+        cp3_rider = st.selectbox("Coureur", sel, key="cp3_rider")
+    if not cp3_rider:
+        cp3_rider = sel[0]
+    _CP3_EDIT_KEYS = ("cp3_rider", "cp3_s1", "cp3_s2", "cp3_s3",
+                      "cp3_s4", "cp3_s5", "cp3_s6", "cp3_fc") + ("cp3_cmt",)
+    _prev3 = st.session_state.get("cp3_data", {}).get(cp3_rider, {})
+    _pv3_segs = _prev3.get("segs") or [0, 0, 0, 0, 0, 0]
+    _pv3_fc = _prev3.get("fc")
+    _pv3_cmt = _prev3.get("cmt") or ""
+    with st.form("cp3_entry"):
+        st.markdown(f"**{cp3_rider}** — puissance MOYENNE de chaque tranche de 30 s")
+        _sc = st.columns(3)
+        s1_ = _sc[0].number_input("0–30 s (W)", 0, 1600, int(_pv3_segs[0] or 0),
+                                  key="cp3_s1", help="Départ à bloc — doit être le pic de l'effort.")
+        s2_ = _sc[1].number_input("30–60 s (W)", 0, 1600, int(_pv3_segs[1] or 0), key="cp3_s2")
+        s3_ = _sc[2].number_input("60–90 s (W)", 0, 1600, int(_pv3_segs[2] or 0), key="cp3_s3")
+        s4_ = _sc[0].number_input("90–120 s (W)", 0, 1600, int(_pv3_segs[3] or 0), key="cp3_s4")
+        s5_ = _sc[1].number_input("120–150 s (W)", 0, 1600, int(_pv3_segs[4] or 0), key="cp3_s5")
+        s6_ = _sc[2].number_input("150–180 s (W)", 0, 1600, int(_pv3_segs[5] or 0), key="cp3_s6",
+                                  help="La CLÉ du test : sa moyenne des 30 dernières secondes = CP.")
+        fcf = st.number_input("FC dernière minute (bpm)", 80, 230,
+                              int(_pv3_fc or 150), key="cp3_fc")
+        cmt3 = st.text_input("Commentaire", _pv3_cmt,
+                             placeholder="ex. vent de face, départ à 25 km/h, spé n'a pas tout donné",
+                             key="cp3_cmt")
+        if st.form_submit_button("💾 Enregistrer ce test"):
+            st.session_state.setdefault("cp3_data", {})[cp3_rider] = {
+                "segs": [s1_ or None, s2_ or None, s3_ or None,
+                         s4_ or None, s5_ or None, s6_ or None],
+                "fc": fcf or None, "cmt": cmt3 or "",
+                "group": group_of.get(cp3_rider, "—"),
+                "weight": weight_of(cp3_rider)}
+            st.success(f"✅ Test 3′ enregistré pour {cp3_rider}.")
+
+    data3 = st.session_state.get("cp3_data", {})
+    entered3 = [n for n in sel if n in data3]
+    rows3 = []
+    for n in entered3:
+        d3 = data3[n]
+        segs = [_num(x) for x in (d3.get("segs") or [None] * 6)]
+        if any(x is None for x in segs):
+            continue
+        cp3 = segs[5]
+        if not cp3:
+            continue
+        plateau = abs(segs[5] - segs[4]) / max(segs[5], 1.0)
+        allout = segs[0] >= 1.15 * cp3
+        wprime = sum(max(0.0, x - cp3) for x in segs) * 30.0 / 1000.0
+        cp_ref, src_ref = _cp_of(n)
+        rows3.append({"Coureur": n, "Groupe": d3.get("group", "—"),
+                      "CP 3′ (W)": round(cp3),
+                      "CP 3′ (W/kg)": round(cp3 / weight_of(n), 2),
+                      "W′ (kJ)": round(wprime, 1),
+                      "Départ dur": "✅" if allout else "⚠️",
+                      "Plateau": "✅" if plateau < 0.05 else f"⚠️ ±{plateau * 100:.0f} %",
+                      "CP 5′/20′": round(cp_ref) if cp_ref else "",
+                      "Source CP": src_ref,
+                      "Écart": f"{(cp3 - cp_ref) / cp_ref * 100:+.1f} %" if cp_ref else "",
+                      "FC fin": d3.get("fc") or "—",
+                      "Commentaire": d3.get("cmt") or ""})
+    if not rows3:
+        st.info("Enregistre un test 3′ ci-dessus (les 6 tranches) pour lancer l'analyse.")
+    else:
+        st.subheader("Analyse")
+        st.dataframe(pd.DataFrame(rows3), hide_index=True, use_container_width=True)
+        for r3 in rows3:
+            n = r3["Coureur"]
+            d3 = data3[n]
+            segs = [_num(x) for x in d3["segs"]]
+            cp3 = float(segs[5])
+            plateau = abs(segs[5] - segs[4]) / max(segs[5], 1.0)
+            wprime = sum(max(0.0, x - cp3) for x in segs) * 30.0 / 1000.0
+            cp_ref, src_ref = _cp_of(n)
+            with st.expander(f"⚡ {n} — {d3.get('group', '—')} · CP 3′ {cp3:.0f} W "
+                             f"({cp3 / weight_of(n):.1f} W/kg) · W′ {wprime:.1f} kJ"):
+                st.markdown(
+                    f"**CP 3′ : {cp3:.0f} W** · **W′ : {wprime:.1f} kJ** · "
+                    f"P 0–30 s : {segs[0]:.0f} W · FC fin : {d3.get('fc') or '—'} bpm "
+                    f"· {d3.get('fc') and ''}poids {weight_of(n):.1f} kg")
+                if d3.get("cmt"):
+                    st.caption(f"💬 {d3['cmt']}")
+                fig3 = go.Figure(go.Bar(
+                    x=[f"{i * 30}–{(i + 1) * 30} s" for i in range(6)],
+                    y=segs, marker_color="#2563eb",
+                    hovertemplate="%{x} : %{y} W<extra></extra>"))
+                fig3.add_hline(y=cp3, line_dash="dot", line_color="#dc2626",
+                               annotation_text=f"CP 3′ = {cp3:.0f} W")
+                fig3.update_layout(template="plotly_white", height=300,
+                                   yaxis_title="Puissance (W)",
+                                   xaxis_title="Tranches de l'effort")
+                st.plotly_chart(fig3, use_container_width=True)
+                st.dataframe(pd.DataFrame(
+                    [{"Tranche": f"{i * 30}–{(i + 1) * 30} s",
+                      "P moy. (W)": x,
+                      "% CP 3′": f"{x / cp3 * 100:.0f} %",
+                      "Au-dessus de CP (W)": round(max(0.0, x - cp3))}
+                     for i, x in enumerate(segs)]),
+                    hide_index=True, use_container_width=True)
+                st.markdown("**Validité & lecture automatique**")
+                if segs[0] >= 1.15 * cp3:
+                    st.caption("✅ Départ franc — la W′ est exploitable.")
+                else:
+                    st.caption("⚠️ Départ trop mou (0–30 s < 115 % de la CP) — "
+                               "W′ sous-estimée : refais le test en mettant la "
+                               "gomme dès la première seconde.")
+                if plateau >= 0.05:
+                    st.caption(f"⚠️ Pas de plateau net ({segs[4]:.0f} → {segs[5]:.0f} "
+                               f"W, écart {plateau * 100:.0f} %) — CP peu fiable : "
+                               "le coureur a encore ralenti à la fin ou le test "
+                               "était trop long pour lui.")
+                else:
+                    st.caption("✅ Plateau net en fin d'effort — CP solide.")
+                if cp_ref:
+                    ecart = (cp3 - cp_ref) / cp_ref * 100
+                    if abs(ecart) <= 4:
+                        st.caption(f"✅ Cohérente avec la CP du test 5′/20′ "
+                                   f"({src_ref} : {cp_ref:.0f} W, écart "
+                                   f"{ecart:+.1f} %) — CP validée.")
+                    elif ecart > 4:
+                        st.caption(f"⚠️ CP 3′ au-dessus du 5′/20′ ({cp_ref:.0f} W) "
+                                   f"de {ecart:+.1f} % — le 5′/20′ était "
+                                   "sous-maximal (ou fractionné/venté) ; la CP 3′ "
+                                   "semble plus proche de la réalité.")
+                    else:
+                        st.caption(f"⚠️ CP 3′ en dessous du 5′/20′ ({cp_ref:.0f} W) "
+                                   f"de {ecart:.1f} % — fatigue ce jour-là ou "
+                                   "effort 3′ pas à bloc ; ne baisse pas la CP "
+                                   "de la fiche sur cette seule lecture.")
+                zt3 = cp_zone_table(cp3)
+                if zt3:
+                    st.markdown("**Zones d'entraînement (en % de la CP 3′)**")
+                    st.dataframe(pd.DataFrame(
+                        [{"Zone": z, "Bas (W)": round(lo) if lo else "—",
+                          "Haut (W)": round(hi) if hi else "ouvert"}
+                         for z, lo, hi in zt3]),
+                        hide_index=True, use_container_width=True)
+        st.download_button("⬇️ Tests 3′ (CSV)",
+                           pd.DataFrame(rows3).to_csv(index=False, sep=";",
+                                                       decimal=",").encode("utf-8-sig"),
+                           "tests_3min_allout.csv", "text/csv")
+
+
+# ═══════════════════════════════ SPRINTS & RSA ═══════════════════════════════
+elif tool == "sprint":
+
+    def _cp_of(n):
+        """CP d'un coureur : 1) outil 5'/20' en session ; 2) profil de la fiche."""
+        cdf = st.session_state.get("cp_collect")
+        if isinstance(cdf, pd.DataFrame) and not cdf.empty and "Nom" in cdf.columns:
+            _m = cdf[cdf["Nom"].astype(str).str.strip() == str(n)]
+            if not _m.empty:
+                _c = _num(_m.iloc[0].get("CP (W)"))
+                if _c:
+                    return _c, "test 5′/20′"
+        nr = rider_by_name.get(n, {})
+        _c = _num(nr.get("cp")) or _num(nr.get("p60m"))
+        return (_c, "profil fiche") if _c else (None, "—")
+
+    mode_s = st.radio("Format", ["🌀 Sprints max (3–5 × ~10 s)",
+                                 "🔁 RSA — sprints répétés (10 × 6 s / 30 s)"],
+                      horizontal=True, key="sprint_format")
+
+    with st.expander("❓ Explications — comment ça marche"):
+        if mode_s.startswith("🌀"):
+            st.markdown(
+                "**Le test.** 3 à 5 sprints de ~10 s à bloc, départ LANCÉ à "
+                "30–40 km/h (abri, moto ou descente douce), récup COMPLÈTE de "
+                "5–8 min entre chaque. Note pour chaque sprint : le pic 1″ "
+                "(pure puissance), le pic 5″ (le standard sprint), la puissance "
+                "moyenne, la cadence au pic, la FC de fin, la RPE — et le lactate "
+                "après le 2ᵉ et le dernier sprint (on peut monter à 6–10 mmol/L, "
+                "c'est normal : le sprint sollicite fort la filière glycolytique).")
+            st.markdown(
+                "**Comment je le lis.** Le pic 5″ du MEILLEUR sprint comparé à la "
+                "CP du coureur dit son profil : au-dessus de 2,5 × CP = gros "
+                "sprinteur ; 2,0–2,5 × = offensif, gagne ses duels de côte-à-côte "
+                "mais pas les arrivals massives ; sous 2,0 × = rouleur. La CHUTE "
+                "du meilleur sprint au dernier = le niveau de fatigue : en course, "
+                "c'est ce qui reste dans la dernière relance.")
+        else:
+            st.markdown(
+                "**Le test.** 10 × 6 s à bloc, récup de 30 s assis (passive). "
+                "Note le pic et la moyenne de chaque sprint. On calcule le "
+                "S_dec (décrément de sprint) = combien de % de puissance le "
+                "coureur perd en moyenne par rapport à son meilleur sprint.")
+            st.markdown(
+                "**Comment je le lis.** S_dec < 5 % = finisseur : il répète "
+                "presque au même niveau (opperatif pour les arrivées qui "
+                "s'élancent déjà fatiguées) ; 5–10 % = correct ; au-dessus de "
+                "10 % = il s'essouffle vite : à travaille en RSA dans le plan. "
+                "C'est souvent CE test qui départage deux coureurs à CP égale "
+                "en course par étapes.")
+
+    try:
+        spr_rider = st.pills("Coureur — un clic", sel, key="spr_rider",
+                             default=[sel[0]],
+                             help="Un coureur à la fois — chaque coureur a son "
+                                  "propre tableau, rien ne fuit d'un autre.")
+    except Exception:
+        spr_rider = st.selectbox("Coureur", sel, key="spr_rider")
+    if not spr_rider:
+        spr_rider = sel[0]
+
+    if mode_s.startswith("🌀"):
+        SPR_C = ["P pic 1″ (W)", "P pic 5″ (W)", "P moy sprint (W)",
+                 "Cadence pic (rpm)", "FC fin (bpm)", "Lactate (mmol/L)",
+                 "RPE (/10)", "Commentaire"]
+        sk = f"spr_data_{spr_rider}"
+        if sk not in st.session_state:
+            st.session_state[sk] = pd.DataFrame(
+                [{"Sprint": f"S{i}",
+                  **{c: ("" if c == "Commentaire" else None) for c in SPR_C}}
+                 for i in range(1, 6)])
+        with st.form(f"spr_form_{abs(hash(spr_rider)) % 10 ** 8}",
+                     clear_on_submit=False):
+            sdf = st.data_editor(
+                st.session_state[sk].reindex(columns=["Sprint"] + SPR_C),
+                key=f"spr_ed_{spr_rider}", hide_index=True,
+                use_container_width=True, num_rows="fixed",
+                column_config={
+                    "Sprint": st.column_config.TextColumn("Sprint", disabled=True),
+                    "P pic 1″ (W)": st.column_config.NumberColumn(
+                        "P pic 1″ (W)", min_value=0, max_value=2500, step=5,
+                        help="Le pic instantané le plus haut vu sur la 10 s."),
+                    "P pic 5″ (W)": st.column_config.NumberColumn(
+                        "P pic 5″ (W)", min_value=0, max_value=2500, step=5,
+                        help="Puissance moyenne des 5 MEILLEURES secondes — "
+                             "le standard du sprint."),
+                    "P moy sprint (W)": st.column_config.NumberColumn(
+                        "P moy sprint (W)", min_value=0, max_value=2500, step=5),
+                    "Cadence pic (rpm)": st.column_config.NumberColumn(
+                        "Cadence pic (rpm)", min_value=0, max_value=200, step=1),
+                    "FC fin (bpm)": st.column_config.NumberColumn(
+                        "FC fin (bpm)", min_value=80, max_value=230, step=1),
+                    "Lactate (mmol/L)": st.column_config.NumberColumn(
+                        "Lactate (mmol/L)", min_value=0.0, max_value=20.0,
+                        step=0.1, format="%.1f",
+                        help="Après le 2ᵉ sprint et le dernier : 5–10 = normal."),
+                    "RPE (/10)": st.column_config.NumberColumn(
+                        "RPE (/10)", min_value=0.0, max_value=10.0, step=0.5),
+                    "Commentaire": st.column_config.TextColumn("Commentaire")})
+            if st.form_submit_button("💾 Enregistrer les sprints"):
+                st.session_state[sk] = sdf.copy()
+                st.success(f"✅ Sprints enregistrés pour {spr_rider}.")
+
+        def _spr_rows(n):
+            df = st.session_state.get(f"spr_data_{n}")
+            if df is None or df.empty:
+                return []
+            out_ = []
+            for _, r in df.iterrows():
+                vals_ = {k: _num(r.get(k)) for k in
+                         ("P pic 1″ (W)", "P pic 5″ (W)", "P moy sprint (W)",
+                          "Cadence pic (rpm)", "FC fin (bpm)",
+                          "Lactate (mmol/L)", "RPE (/10)")}
+                if any(v is not None for v in vals_.values()):
+                    out_.append({"Sprint": str(r.get("Sprint") or f"S{len(out_) + 1}"),
+                                 **vals_,
+                                 "Commentaire": str(r.get("Commentaire") or "")})
+            return out_
+
+        st.subheader("Rapport détaillé — sprints max")
+        rows4 = []
+        for n in sel:
+            rw = _spr_rows(n)
+            if len(rw) < 2:
+                continue
+            b1 = max((r_.get("P pic 1″ (W)") or 0) for r_ in rw)
+            b5 = max((r_.get("P pic 5″ (W)") or 0) for r_ in rw)
+            first, last = rw[0], rw[-1]
+            p5f, p5l = (first.get("P pic 5″ (W)") or 0), (last.get("P pic 5″ (W)") or 0)
+            chute = ((p5f - p5l) / p5f * 100) if p5f else 0.0
+            cp_r, src_r = _cp_of(n)
+            ratio = (b5 / cp_r) if (cp_r and b5) else None
+            rows4.append({"Coureur": n, "Groupe": group_of.get(n, "—"),
+                          "Sprints": len(rw),
+                          "Pic 1″ max (W)": round(b1) if b1 else "",
+                          "Pic 5″ max (W)": round(b5) if b5 else "",
+                          "Pic 5″ (W/kg)": round(b5 / weight_of(n), 2) if b5 else "",
+                          "R ratio P5″/CP": f"{ratio:.1f}" if ratio else "",
+                          "Source CP": src_r if cp_r else "",
+                          "Chute S1→Sn": f"{chute:.0f} %",
+                          "Lactate max": max((r_.get("Lactate (mmol/L)") or 0)
+                                             for r_ in rw) or "",
+                          "Verdict": (("🌀 Profil sprinteur" if ratio >= 2.5
+                                       else "⚡ Offensif" if ratio >= 2.0
+                                       else "🧗 Profil rouleur")
+                                      if ratio else "⏳ Il manque la CP")})
+        if rows4:
+            st.dataframe(pd.DataFrame(rows4), hide_index=True, use_container_width=True)
+        for n in sel:
+            rw = _spr_rows(n)
+            if not rw:
+                continue
+            cp_r, src_r = _cp_of(n)
+            b5 = max((r_.get("P pic 5″ (W)") or 0) for r_ in rw)
+            with st.expander(f"🌀 {n} — {len(rw)} sprint(s)" +
+                             (f" · meilleur pic 5″ {b5:.0f} W" if b5 else "")):
+                st.dataframe(pd.DataFrame(rw), hide_index=True, use_container_width=True)
+                figs = go.Figure()
+                xs = [r_["Sprint"] for r_ in rw]
+                for col_, colcol_, nm_ in [("P pic 1″ (W)", "#dc2626", "Pic 1″"),
+                                           ("P pic 5″ (W)", "#dc2626", "Pic 5″"),
+                                           ("P moy sprint (W)", "#2563eb", "P moy.")]:
+                    ys = [r_.get(col_) for r_ in rw]
+                    if any(v is not None for v in ys):
+                        figs.add_trace(go.Bar(x=xs, y=ys, name=nm_,
+                                              marker_color=colcol_))
+                if cp_r:
+                    figs.add_hline(y=cp_r, line_dash="dot", line_color="#64748b",
+                                   annotation_text=f"CP ({src_r}) = {cp_r:.0f} W")
+                figs.update_layout(template="plotly_white", barmode="group",
+                                   height=320, yaxis_title="Puissance (W)",
+                                   legend=dict(orientation="h", yanchor="bottom",
+                                               y=1.02, xanchor="right", x=1))
+                st.plotly_chart(figs, use_container_width=True)
+                for r_ in rw:
+                    if r_.get("Commentaire"):
+                        st.caption(f"💬 {r_['Sprint']} — {r_['Commentaire']}")
+                lact = [r_.get("Lactate (mmol/L)") for r_ in rw if r_.get("Lactate (mmol/L)")]
+                if lact:
+                    la_m = max(lact)
+                    ver_ = ("🟢 Peu de sollicitation glycolytique (au-dessous de ce "
+                            "qu'on attend d'un sprint vrai)" if la_m < 5
+                            else "✅ Sollicitation attendue pour un sprint à bloc" if la_m <= 12
+                            else "🔴 Très engorgé — vérifie les récupérations et la "
+                                 "durée des sprints")
+                    st.caption(f"🩸 Lactate sprint max : {la_m:.1f} mmol/L — {ver_}")
+                if cp_r and b5:
+                    ratio = b5 / cp_r
+                    if ratio >= 2.5:
+                        st.caption("🌀 Au-dessus de 2,5 × CP : gros profil "
+                                   "sprinteur — garde ce coureur pour les "
+                                   "arrivées massives.")
+                    elif ratio >= 2.0:
+                        st.caption("⚡ Entre 2,0 × et 2,5 × CP : offensif — il gagne "
+                                   "les duels et les arrivées réduites, pas les "
+                                   "massives.")
+                    else:
+                        st.caption("🧗 Sous 2,0 × CP : profil rouleur — son "
+                                   "argent est ailleurs (GC, TTT, echappées).")
+        st.download_button("⬇️ Sprints max (CSV)",
+                           pd.DataFrame(rows4).to_csv(index=False, sep=";",
+                                                       decimal=",").encode("utf-8-sig"),
+                           "tests_sprints_max.csv", "text/csv")
+
+    else:  # RSA
+        RSA_C = ["P pic (W)", "P moy 6″ (W)", "RPE (/10)", "Commentaire"]
+        sk = f"rsa_data_{spr_rider}"
+        if sk not in st.session_state:
+            st.session_state[sk] = pd.DataFrame(
+                [{"Sprint": f"S{i}",
+                  **{c: ("" if c == "Commentaire" else None) for c in RSA_C}}
+                 for i in range(1, 11)])
+        with st.form(f"rsa_form_{abs(hash(spr_rider)) % 10 ** 8}",
+                     clear_on_submit=False):
+            rdf = st.data_editor(
+                st.session_state[sk].reindex(columns=["Sprint"] + RSA_C),
+                key=f"rsa_ed_{spr_rider}", hide_index=True,
+                use_container_width=True, num_rows="fixed",
+                column_config={
+                    "Sprint": st.column_config.TextColumn("Sprint", disabled=True),
+                    "P pic (W)": st.column_config.NumberColumn(
+                        "P pic (W)", min_value=0, max_value=2500, step=5),
+                    "P moy 6″ (W)": st.column_config.NumberColumn(
+                        "P moy 6″ (W)", min_value=0, max_value=2500, step=5,
+                        help="Moyenne des 6 s du sprint (S_dec classique)."),
+                    "RPE (/10)": st.column_config.NumberColumn(
+                        "RPE (/10)", min_value=0.0, max_value=10.0, step=0.5),
+                    "Commentaire": st.column_config.TextColumn("Commentaire")})
+            if st.form_submit_button("💾 Enregistrer le RSA"):
+                st.session_state[sk] = rdf.copy()
+                st.success(f"✅ RSA enregistré pour {spr_rider}.")
+
+        def _rsa_rows(n):
+            df = st.session_state.get(f"rsa_data_{n}")
+            if df is None or df.empty:
+                return []
+            out_ = []
+            for _, r in df.iterrows():
+                vals_ = {k: _num(r.get(k)) for k in ("P pic (W)", "P moy 6″ (W)",
+                                                     "RPE (/10)")}
+                if any(v is not None for v in vals_.values()):
+                    out_.append({"Sprint": str(r.get("Sprint")), **vals_,
+                                 "Commentaire": str(r.get("Commentaire") or "")})
+            return out_
+
+        st.subheader("Rapport détaillé — RSA")
+        rows5 = []
+        for n in sel:
+            rw = _rsa_rows(n)
+            if len(rw) < 3:
+                continue
+            ms_ = [r_.get("P moy 6″ (W)") or 0 for r_ in rw]
+            ps_ = [r_.get("P pic (W)") or 0 for r_ in rw]
+            best = max(ms_) if any(ms_) else 0
+            meanok = [v for v in ms_ if v]
+            sdec = (100 * (1 - (sum(meanok) / len(meanok)) / best)) if (best and meanok) else None
+            rows5.append({"Coureur": n, "Groupe": group_of.get(n, "—"),
+                          "Répétitions": len(rw),
+                          "Meilleur 6″ (W)": round(best) if best else "",
+                          "Pic max (W)": round(max(ps_)) if any(ps_) else "",
+                          "S_dec": f"{sdec:.0f} %" if sdec is not None else "",
+                          "S1→Sn": f"{((ms_[0] - ms_[-1]) / ms_[0] * 100):.0f} %"
+                          if (ms_[0] and ms_[-1]) else "",
+                          "Verdict": (("🔁 Finisseur — répète au top" if sdec < 5
+                                       else "🟡 Correct" if sdec <= 10
+                                       else "🔴 S'essouffle vite")
+                                      if sdec is not None else "⏳ Il manque des sprints")})
+        if rows5:
+            st.dataframe(pd.DataFrame(rows5), hide_index=True, use_container_width=True)
+        for n in sel:
+            rw = _rsa_rows(n)
+            if len(rw) < 2:
+                continue
+            ms_ = [r_.get("P moy 6″ (W)") or 0 for r_ in rw]
+            ps_ = [r_.get("P pic (W)") or 0 for r_ in rw]
+            with st.expander(f"🔁 {n} — {len(rw)} sprint(s) RSA"):
+                st.dataframe(pd.DataFrame(rw), hide_index=True, use_container_width=True)
+                figs = go.Figure()
+                figs.add_trace(go.Bar(x=[r_["Sprint"] for r_ in rw],
+                                      y=[v or 0 for v in ms_],
+                                      name="P moy 6″", marker_color="#2563eb"))
+                figs.add_trace(go.Scatter(x=[r_["Sprint"] for r_ in rw],
+                                          y=[v or 0 for v in ps_],
+                                          name="P pic", mode="lines+markers",
+                                          line=dict(color="#dc2626", width=2)))
+                figs.update_layout(template="plotly_white", height=320,
+                                   yaxis_title="Puissance (W)")
+                st.plotly_chart(figs, use_container_width=True)
+                for r_ in rw:
+                    if r_.get("Commentaire"):
+                        st.caption(f"💬 {r_['Sprint']} — {r_['Commentaire']}")
+                best = max(ms_) if any(ms_) else 0
+                meanok = [v for v in ms_ if v]
+                if best and meanok:
+                    sdec = 100 * (1 - (sum(meanok) / len(meanok)) / best)
+                    ver_ = ("🔁 Finisseur : il répète presque au même niveau — "
+                            "c'est une arme en course par étapes." if sdec < 5
+                            else "🟡 Correct : il perd de la force au fil des "
+                                 "sprints — travaillable en RSA dans le plan."
+                            if sdec <= 10 else
+                            "🔴 Il s'essouffle vite : au-delà de 10 % de chute "
+                            "moyenne — priorité RSA (intervalles courts répétés).")
+                    st.caption(f"**S_dec : {sdec:.0f} %** — {ver_}")
+        st.download_button("⬇️ RSA (CSV)",
+                           pd.DataFrame(rows5).to_csv(index=False, sep=";",
+                                                       decimal=",").encode("utf-8-sig"),
+                           "tests_rsa.csv", "text/csv")
