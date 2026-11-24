@@ -12,7 +12,8 @@ from core.riders import parse_riders_csv, cached_csv, store_csv
 from core.lactate import (SV1_METHODS, baseline_lactate, clean_steps, sv1,
                           sv1_block_verdict, sv1_trend, sv2, zone_table,
                           zone_table_partial)
-from core.powermodel import CP_ZONE_PCTS, cp_from_5_20, cp_zone_table
+from core.powermodel import (CP_ZONE_PCTS, FC_ZONE_PCTS, cp_from_5_20,
+                             cp_zone_table, fc_zone_table)
 
 st.set_page_config(page_title="Testing — WT Performance Hub", page_icon="🧪", layout="wide")
 gate()
@@ -88,7 +89,7 @@ for level, msg in st.session_state.get("test_src_note", []):
 
 st.title("🧪 Testing — lactate & SV1")
 st.caption("Test lactate par paliers → seuils SV1/SV2, zones watts/FC et rapport. "
-           "Test SV1 3×15' → zone cible en amont, lactates par bloc, analyse par coureur "
+           "Test SV1 3×15' → zone de travail calculée en amont (plancher/plafond en watts et FC), lactates par bloc, analyse par coureur "
            "et par groupe. Les données restent dans ta session — exporte en CSV pour les garder.")
 
 with st.expander("➕ Ajouter des coureurs manuellement (hors Vekta / TP)"):
@@ -212,9 +213,10 @@ TOOLS = {
     "sv1": ("🎯 SV1 — 3×15′",
             "Zone cible en amont, lactates par bloc, analyse coureur et groupe",
             "En usage"),
-    "field": ("🏁 Lactate Terrain",
-              "Collecte de test de terrain : puissance révisée, code couleur suspects, "
-              "W/kg vs durée",
+    "field": ("🥸 Lactate Terrain — seuils & max",
+              "Paliers sur le terrain → SV1 (méthode au choix), SV2 (OBLA 4), "
+              "P max du dernier palier, puissance révisée, suspects, lecture "
+              "automatique",
               "En usage"),
     "cp": ("⏱️ 5′ & 20′ CP",
            "Deux efforts à bloc → CP/W′ à 2 points, 6 zones d'entraînement",
@@ -256,7 +258,8 @@ if tool == "lactate":
     if steps_key not in st.session_state:
         st.session_state[steps_key] = pd.DataFrame(
             {"Puissance (W)": [100, 150, 200, 250, 300, 350],
-             "FC (bpm)": [None] * 6, "Lactate (mmol/L)": [None] * 6})
+             "FC (bpm)": [None] * 6, "Lactate (mmol/L)": [None] * 6,
+             "RPE (/10)": [None] * 6})
     st.caption("Tape tes paliers puis clique sur 💾 Enregistrer ou directement "
                "sur 📊 Générer le rapport — rien n'est perdu pendant "
                "la frappe.")
@@ -277,6 +280,9 @@ if tool == "lactate":
                                         "Lactate (mmol/L)": st.column_config.NumberColumn(
                                             "Lactate (mmol/L)", min_value=0.0,
                                             max_value=20.0, step=0.1, format="%.1f"),
+                                        "RPE (/10)": st.column_config.NumberColumn(
+                                            "RPE (/10)", min_value=0.0, max_value=10.0,
+                                            step=0.5, format="%.1f"),
                                     })
             b1, b2 = st.columns(2)
             saved = b1.form_submit_button("💾 Enregistrer les paliers")
@@ -284,7 +290,8 @@ if tool == "lactate":
                                         type="primary")
     except Exception:
         st.session_state[steps_key] = pd.DataFrame(
-            {"Puissance (W)": [None], "FC (bpm)": [None], "Lactate (mmol/L)": [None]})
+            {"Puissance (W)": [None], "FC (bpm)": [None], "Lactate (mmol/L)": [None],
+             "RPE (/10)": [None]})
         st.warning("Tableau réinitialisé (état incompatible détecté).")
         st.rerun()
     if saved or gen:
@@ -346,6 +353,12 @@ if tool == "lactate":
             return []
         return [(row["Puissance (W)"], row["FC (bpm)"], row["Lactate (mmol/L)"])
                 for _, row in df.iterrows()]
+
+    def rpes_of(n):
+        df = st.session_state.get(f"lac_steps_{n}")
+        if df is None or df.empty or "RPE (/10)" not in df.columns:
+            return []
+        return [_num(_r.get("RPE (/10)")) for _, _r in df.iterrows()]
 
     st.caption("✅ Test SV1 minimal : 3 à 4 paliers suffisent. Avec la méthode "
                "« base + 0,5 » ou « base + 1,0 », pas besoin d'atteindre "
@@ -418,6 +431,17 @@ if tool == "lactate":
                                   legend=dict(orientation="h", yanchor="bottom", y=1.02,
                                               xanchor="right", x=1))
                 st.plotly_chart(fig, use_container_width=True)
+                _rc_ = clean_steps(steps_of(n))
+                _rp_ = rpes_of(n)
+                if _rp_ and any(v is not None for v in _rp_):
+                    st.markdown("**Paliers & RPE (ressenti)**")
+                    st.dataframe(pd.DataFrame(
+                        [{"Palier": i + 1,
+                          "Puissance (W)": None if np.isnan(p) else p,
+                          "RPE (/10)": v}
+                         for i, (v, (p, _, _)) in enumerate(zip(_rp_, _rc_))
+                         if v is not None]),
+                        hide_index=True, use_container_width=True)
 
         with st.expander(f"✍️ Ajuster les seuils à la main — {rider_sel}"):
             cur = results.get(rider_sel)
@@ -443,8 +467,13 @@ if tool == "lactate":
                     st.rerun()
 
         zc1, zc2, zc3 = st.columns(3)
+        _rpe_moy = {}
+        for _rn in results:
+            _rv = [v for v in rpes_of(_rn) if v is not None]
+            _rpe_moy[_rn] = round(float(np.mean(_rv)), 1) if _rv else None
         seuils_csv = pd.DataFrame(
             [{"Coureur": r["name"], "Groupe": r["group"],
+              "RPE moy. (/10)": _rpe_moy.get(r["name"]),
               "P SV1 (W)": round(r["p_sv1"]) if r["p_sv1"] else "",
               "FC SV1": round(r["hr_sv1"]) if _num(r["hr_sv1"]) else "",
               "P SV2 (W)": round(r["p_sv2"]) if r["p_sv2"] else "",
@@ -481,10 +510,12 @@ if tool == "lactate":
 
 # ═════════════════════════ TEST SV1 — 3 × 15' ═════════════════════════
 elif tool == "sv1":
-    st.subheader("1 · Zone cible en amont")
-    st.caption("3 × 15' calés entre SV1 et SV2 : FC entre SV1+2 bpm et SV2−10 bpm, "
-               "puissance entre P@SV1 et la moitié SV1→SV2. Sans test lactate saisi : "
-               "repli 78–85 % FCmax et 70–85 % CP. Tout est modifiable à la main.")
+    st.subheader("1 · Zone de travail — calage des blocs de 15'")
+    st.caption("3 × 15' en zone entre SV1 et SV2. PLANCHER (W) = bas de la zone — "
+               "la puissance au niveau de SV1. PLAFOND (W) = haut de la zone — à "
+               "mi-chemin entre SV1 et SV2. Le coureur roule entre les deux, FC "
+               "entre FC plancher et FC plafond. Sans test lactate saisi : "
+               "estimation 78–85 % FCmax et 70–85 % CP. Tout est modifiable à la main.")
     lac_res = st.session_state.get("lac_results", {})
     tgt_rows = []
     for n in sel:
@@ -500,97 +531,205 @@ elif tool == "sv1":
             hi_hr = lr["hr_sv2"] - 10 if _num(lr["hr_sv2"]) else 0.85 * hrmax
             lo_p = lr["p_sv1"]
             hi_p = (lr["p_sv1"] + lr["p_sv2"]) / 2 if lr.get("p_sv2") else lr["p_sv1"] * 1.10
-            base = "test lactate"
+            base = "mesuré au test lactate"
         else:
             lo_hr, hi_hr = 0.78 * hrmax, 0.85 * hrmax
             lo_p = 0.70 * cp if cp else None
             hi_p = 0.85 * cp if cp else None
-            base = "repli %HRmax / %CP"
+            base = "estimé sans test lactate (%FCmax / %CP)"
         tgt_rows.append({"Coureur": n, "Groupe": group_of.get(n, "—"),
-                         "FC basse": round(lo_hr), "FC haute": round(hi_hr),
-                         "P basse (W)": round(lo_p) if lo_p else None,
-                         "P haute (W)": round(hi_p) if hi_p else None,
-                         "Ancrage": base})
+                         "FC plancher": round(lo_hr), "FC plafond": round(hi_hr),
+                         "Plancher (W)": round(lo_p) if lo_p else None,
+                         "Plafond (W)": round(hi_p) if hi_p else None,
+                         "Source des cibles": base})
     tgt_key = f"sv1_targets_{abs(hash(tuple(sel))) % 10 ** 8}"
     tdf = st.data_editor(pd.DataFrame(tgt_rows), key=tgt_key, hide_index=True,
                          use_container_width=True, num_rows="dynamic",
                          column_config={
                              "Coureur": st.column_config.TextColumn("Coureur", disabled=True),
                              "Groupe": st.column_config.TextColumn("Groupe", disabled=True),
-                             "FC basse": st.column_config.NumberColumn(min_value=80, max_value=230),
-                             "FC haute": st.column_config.NumberColumn(min_value=80, max_value=230),
-                             "P basse (W)": st.column_config.NumberColumn(min_value=50, max_value=700),
-                             "P haute (W)": st.column_config.NumberColumn(min_value=50, max_value=700),
+                             "FC plancher": st.column_config.NumberColumn(
+                                 "FC plancher (bpm)", min_value=80, max_value=230),
+                             "FC plafond": st.column_config.NumberColumn(
+                                 "FC plafond (bpm)", min_value=80, max_value=230),
+                             "Plancher (W)": st.column_config.NumberColumn(
+                                 "Plancher (W)", min_value=50, max_value=700,
+                                 help="Bas de la zone des blocs de 15' — niveau SV1."),
+                             "Plafond (W)": st.column_config.NumberColumn(
+                                 "Plafond (W)", min_value=50, max_value=700,
+                                 help="Haut de la zone — mi-chemin SV1→SV2."),
+                             "Source des cibles": st.column_config.TextColumn(
+                                 "Source", disabled=True,
+                                 help="D'où viennent les chiffres pour ce coureur."),
                          })
     st.download_button("⬇️ Cibles 3×15' (CSV)",
                        tdf.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
                        "cibles_sv1_3x15.csv", "text/csv")
 
-    st.subheader("2 \u00b7 Mesures prises pendant la s\u00e9ance")
-    st.caption("Par bloc : lactate (piq\u00fbre juste apr\u00e8s), FC moyenne, puissance "
-               "moyenne (compteur), distance et RPE. Le lactate de repos sert de base "
-               "de comparaison. Enregistre par coureur \u2014 rien n'est perdu pendant la "
-               "frappe, et les valeurs d\u00e9j\u00e0 saisies sont reprises au chargement.")
-    sv1_rider = st.selectbox("Coureur", sel, key="sv1_rider")
+    st.subheader("2 · Mesures prises pendant la séance")
+    st.caption("Par bloc : TEMPS RÉEL (cible 15'), lactate (piqûre juste après), "
+               "lactate de secours si piqûre douteuse (la médiane est retenue — "
+               "aucune donnée perdue), n° de l'appareil, FC moyenne, puissance "
+               "moyenne (compteur), distance, RPE et commentaire. Le lactate de "
+               "repos sert de base. Enregistre par coureur — les valeurs déjà "
+               "saisies sont reprises au chargement.")
+    _SV1_EDIT_KEYS = ("sv1_lr", "sv1_la1", "sv1_la2", "sv1_la3",
+                      "sv1_l2b1", "sv1_l2b2", "sv1_l2b3",
+                      "sv1_tm1", "sv1_tm2", "sv1_tm3",
+                      "sv1_fc1", "sv1_fc2", "sv1_fc3",
+                      "sv1_pw1", "sv1_pw2", "sv1_pw3",
+                      "sv1_km1", "sv1_km2", "sv1_km3",
+                      "sv1_rp1", "sv1_rp2", "sv1_rp3",
+                      "sv1_dv1", "sv1_dv2", "sv1_dv3",
+                      "sv1_c1", "sv1_c2", "sv1_c3")
+    try:
+        sv1_rider = st.pills("Coureur — un clic", sel, key="sv1_rider",
+                             default=[sel[0]],
+                             help="Plusieurs coureurs en même temps ? Passe "
+                                  "de l'un à l'autre en un clic — les valeurs "
+                                  "non enregistrées de l'un ne fuient jamais "
+                                  "chez l'autre.")
+    except Exception:
+        sv1_rider = st.selectbox("Coureur", sel, key="sv1_rider")
+    if not sv1_rider:
+        sv1_rider = sel[0]
+    _prev_v = st.session_state.get("sv1_rider_prev")
+    if _prev_v is not None and _prev_v != sv1_rider:
+        for _k in _SV1_EDIT_KEYS:
+            st.session_state.pop(_k, None)
+    st.session_state["sv1_rider_prev"] = sv1_rider
+
+    def _med_lac(a, b):
+        """Lactate retenu : médiane des mesures (1 ou 2) — une pique ratée
+        ne fausse plus le bloc."""
+        if a is None:
+            return None
+        if b is None or b == 0:
+            return float(a)
+        return float(np.median([float(a), float(b)]))
+
     _prev_sv1 = st.session_state.get("sv1_data", {}).get(sv1_rider, {})
     _prev_p = _prev_sv1.get("p") or [None, None, None]
     _prev_km = _prev_sv1.get("km") or [None, None, None]
     _prev_rpe = _prev_sv1.get("rpe") or [None, None, None]
     _prev_lr = _prev_sv1.get("la_repos")
+    _prev_tm = _prev_sv1.get("tm") or [None, None, None]
+    _prev_l2 = _prev_sv1.get("la_sec") or [None, None, None]
+    _prev_dev = _prev_sv1.get("dev") or ["", "", ""]
+    _prev_cmt = _prev_sv1.get("cmt") or ["", "", ""]
     with st.form("sv1_entry"):
-        st.markdown(f"**{sv1_rider}** \u2014 repos : lactate saisi ci-dessous comme base")
+        st.markdown(f"**{sv1_rider}** — le lactate de repos sert de base")
         _lr = st.number_input("Lactate de repos (mmol/L)", 0.0, 20.0,
                               float(_prev_lr) if _prev_lr else 0.8, 0.1,
-                              format="%.1f")
+                              format="%.1f", key="sv1_lr")
         _hcols = st.columns(3)
         for _i, _h in enumerate(["Bloc 1", "Bloc 2", "Bloc 3"]):
             _hcols[_i].caption(_h)
+        st.caption("Le coureur s'arrête devant toi : note le TEMPS RÉEL de chaque "
+                   "bloc (cible 15') — un bloc trop court ou trop long doit se "
+                   "voir. Piqûre douteuse ? note un « lactate de secours » (la "
+                   "MÉDIANE est retenue) et le n° de l'appareil (plusieurs "
+                   "techniciens : si un appareil déraille, on sait quelles piqûres "
+                   "revoir).")
+        _tm_c = st.columns(3)
+        tm1 = _tm_c[0].number_input("Temps réel bloc 1 (min)", 1.0, 90.0,
+                                    float(_prev_tm[0]) if _prev_tm[0] else 15.0,
+                                    0.5, format="%.1f", key="sv1_tm1",
+                                    help="Temps CHRONOMÉTRÉ du bloc, pas la cible "
+                                         "théorique : un bloc mal géré doit se voir.")
+        tm2 = _tm_c[1].number_input("Temps réel bloc 2 (min)", 1.0, 90.0,
+                                    float(_prev_tm[1]) if _prev_tm[1] else 15.0,
+                                    0.5, format="%.1f", key="sv1_tm2")
+        tm3 = _tm_c[2].number_input("Temps réel bloc 3 (min)", 1.0, 90.0,
+                                    float(_prev_tm[2]) if _prev_tm[2] else 15.0,
+                                    0.5, format="%.1f", key="sv1_tm3")
         _la_c = st.columns(3)
         la1 = _la_c[0].number_input("Lactate bloc 1 (mmol/L)", 0.0, 20.0, 1.5, 0.1,
-                                    format="%.1f")
+                                    format="%.1f", key="sv1_la1")
         la2 = _la_c[1].number_input("Lactate bloc 2 (mmol/L)", 0.0, 20.0, 1.5, 0.1,
-                                    format="%.1f")
+                                    format="%.1f", key="sv1_la2")
         la3 = _la_c[2].number_input("Lactate bloc 3 (mmol/L)", 0.0, 20.0, 1.5, 0.1,
-                                    format="%.1f")
+                                    format="%.1f", key="sv1_la3")
+        _l2_c = st.columns(3)
+        l2b1 = _l2_c[0].number_input("Lactate de secours bloc 1", 0.0, 20.0,
+                                     float(_prev_l2[0]) if _prev_l2[0] else 0.0,
+                                     0.1, format="%.1f", key="sv1_l2b1",
+                                     help="2ᵉ piqûre en cas de doute — 0 = pas de "
+                                          "2ᵉ piqûre ; la médiane est retenue.")
+        l2b2 = _l2_c[1].number_input("Lactate de secours bloc 2", 0.0, 20.0,
+                                     float(_prev_l2[1]) if _prev_l2[1] else 0.0,
+                                     0.1, format="%.1f", key="sv1_l2b2")
+        l2b3 = _l2_c[2].number_input("Lactate de secours bloc 3", 0.0, 20.0,
+                                     float(_prev_l2[2]) if _prev_l2[2] else 0.0,
+                                     0.1, format="%.1f", key="sv1_l2b3")
+        _dv_c = st.columns(3)
+        dv1 = _dv_c[0].text_input("N° appareil bloc 1", _prev_dev[0] or "",
+                                  key="sv1_dv1",
+                                  help="Plusieurs techniciens : si un appareil "
+                                       "déraille, on sait quelles piqûres revoir.")
+        dv2 = _dv_c[1].text_input("N° appareil bloc 2", _prev_dev[1] or "",
+                                  key="sv1_dv2")
+        dv3 = _dv_c[2].text_input("N° appareil bloc 3", _prev_dev[2] or "",
+                                  key="sv1_dv3")
         _fc_c = st.columns(3)
-        fc1 = _fc_c[0].number_input("FC moy. bloc 1 (bpm)", 80, 230, 150)
-        fc2 = _fc_c[1].number_input("FC moy. bloc 2 (bpm)", 80, 230, 150)
-        fc3 = _fc_c[2].number_input("FC moy. bloc 3 (bpm)", 80, 230, 150)
+        fc1 = _fc_c[0].number_input("FC moy. bloc 1 (bpm)", 80, 230, 150,
+                                    key="sv1_fc1")
+        fc2 = _fc_c[1].number_input("FC moy. bloc 2 (bpm)", 80, 230, 150,
+                                    key="sv1_fc2")
+        fc3 = _fc_c[2].number_input("FC moy. bloc 3 (bpm)", 80, 230, 150,
+                                    key="sv1_fc3")
         _pw_c = st.columns(3)
         pw1 = _pw_c[0].number_input("P moy. bloc 1 (W)", 0, 800,
-                                    int(_prev_p[0]) if _prev_p[0] else 0)
+                                    int(_prev_p[0]) if _prev_p[0] else 0,
+                                    key="sv1_pw1")
         pw2 = _pw_c[1].number_input("P moy. bloc 2 (W)", 0, 800,
-                                    int(_prev_p[1]) if _prev_p[1] else 0)
+                                    int(_prev_p[1]) if _prev_p[1] else 0,
+                                    key="sv1_pw2")
         pw3 = _pw_c[2].number_input("P moy. bloc 3 (W)", 0, 800,
-                                    int(_prev_p[2]) if _prev_p[2] else 0)
+                                    int(_prev_p[2]) if _prev_p[2] else 0,
+                                    key="sv1_pw3")
         _km_c = st.columns(3)
         km1 = _km_c[0].number_input("Distance bloc 1 (km)", 0.0, 100.0,
                                     float(_prev_km[0]) if _prev_km[0] else 0.0,
-                                    0.1, format="%.1f")
+                                    0.1, format="%.1f", key="sv1_km1")
         km2 = _km_c[1].number_input("Distance bloc 2 (km)", 0.0, 100.0,
                                     float(_prev_km[1]) if _prev_km[1] else 0.0,
-                                    0.1, format="%.1f")
+                                    0.1, format="%.1f", key="sv1_km2")
         km3 = _km_c[2].number_input("Distance bloc 3 (km)", 0.0, 100.0,
                                     float(_prev_km[2]) if _prev_km[2] else 0.0,
-                                    0.1, format="%.1f")
+                                    0.1, format="%.1f", key="sv1_km3")
         _rp_c = st.columns(3)
         rpe1 = _rp_c[0].number_input("RPE bloc 1 (/10)", 0.0, 10.0,
                                      float(_prev_rpe[0]) if _prev_rpe[0] else 0.0,
-                                     0.5, format="%.1f")
+                                     0.5, format="%.1f", key="sv1_rp1")
         rpe2 = _rp_c[1].number_input("RPE bloc 2 (/10)", 0.0, 10.0,
                                      float(_prev_rpe[1]) if _prev_rpe[1] else 0.0,
-                                     0.5, format="%.1f")
+                                     0.5, format="%.1f", key="sv1_rp2")
         rpe3 = _rp_c[2].number_input("RPE bloc 3 (/10)", 0.0, 10.0,
                                      float(_prev_rpe[2]) if _prev_rpe[2] else 0.0,
-                                     0.5, format="%.1f")
-        if st.form_submit_button("\ud83d\udcbe Enregistrer ces donn\u00e9es"):
+                                     0.5, format="%.1f", key="sv1_rp3")
+        _cm_c = st.columns(3)
+        c1 = _cm_c[0].text_input("Commentaire bloc 1", _prev_cmt[0] or "",
+                                 placeholder="ex. piqûre ratée, vent côté",
+                                 key="sv1_c1")
+        c2 = _cm_c[1].text_input("Commentaire bloc 2", _prev_cmt[1] or "",
+                                 key="sv1_c2")
+        c3 = _cm_c[2].text_input("Commentaire bloc 3", _prev_cmt[2] or "",
+                                 key="sv1_c3")
+        if st.form_submit_button("💾 Enregistrer ces données"):
             st.session_state.setdefault("sv1_data", {})[sv1_rider] = {
-                "la": [la1, la2, la3], "fc": [fc1, fc2, fc3],
+                "la": [_med_lac(la1, l2b1), _med_lac(la2, l2b2),
+                       _med_lac(la3, l2b3)],
+                "la_sec": [l2b1 or None, l2b2 or None, l2b3 or None],
+                "tm": [tm1 or None, tm2 or None, tm3 or None],
+                "fc": [fc1, fc2, fc3],
                 "p": [pw1 or None, pw2 or None, pw3 or None],
                 "km": [km1 or None, km2 or None, km3 or None],
                 "rpe": [rpe1 or None, rpe2 or None, rpe3 or None],
+                "dev": [dv1 or "", dv2 or "", dv3 or ""],
+                "cmt": [c1 or "", c2 or "", c3 or ""],
                 "la_repos": _lr,
-                "group": group_of.get(sv1_rider, "\u2014")}
+                "group": group_of.get(sv1_rider, "—")}
 
 
     data = st.session_state.get("sv1_data", {})
@@ -615,8 +754,14 @@ elif tool == "sv1":
         st.subheader("3 · Analyse coureur par coureur")
         st.dataframe(pd.DataFrame(
             [{"Coureur": n, "Groupe": data[n]["group"],
+              "Temps (min)": " / ".join(
+                  f"{x:.1f}" if x else "—"
+                  for x in (data[n].get("tm") or [None] * 3)),
+              "Appareils": " / ".join(data[n].get("dev") or ["", "", ""]),
               "B1": data[n]["la"][0], "B2": data[n]["la"][1], "B3": data[n]["la"][2],
               "Dérive B1→B3": f"{data[n]['la'][2] - data[n]['la'][0]:+.1f}",
+              "Commentaire": " / ".join(c for c in (data[n].get("cmt") or [])
+                                        if c),
               "Verdict": sv1_global(data[n])} for n in entered]),
             hide_index=True, use_container_width=True)
         def _tgt_of(rider):
@@ -634,12 +779,29 @@ elif tool == "sv1":
                 if d.get("la_repos") is not None:
                     st.caption(f"Lactate de repos : {d['la_repos']:.1f} mmol/L")
                 _trow = _tgt_of(n)
+                if _trow is not None:
+                    _fcb = _num(_trow.get("FC plancher"))
+                    _fcp = _num(_trow.get("FC plafond"))
+                    _pln = _num(_trow.get("Plancher (W)"))
+                    _pfl = _num(_trow.get("Plafond (W)"))
+                    _src2 = str(_trow.get("Source des cibles") or "")
+                    _ct = "🎯 Cible donnée au coureur :"
+                    if _fcb and _fcp:
+                        _ct += f" FC {_fcb:.0f}–{_fcp:.0f} bpm"
+                    if _pln and _pfl:
+                        _ct += f" · {_pln:.0f}–{_pfl:.0f} W"
+                    if _src2:
+                        _ct += f" — {_src2}"
+                    st.caption(_ct)
                 for i in range(3):
                     la_i = d["la"][i]
                     fc_i = d["fc"][i]
                     p_i = (d.get("p") or [None] * 3)[i]
                     km_i = (d.get("km") or [None] * 3)[i]
                     rpe_i = (d.get("rpe") or [None] * 3)[i]
+                    tm_i = (d.get("tm") or [None] * 3)[i]
+                    dev_i = (d.get("dev") or ["", "", ""])[i]
+                    cmt_i = (d.get("cmt") or ["", "", ""])[i]
                     bits = [f"lactate **{la_i:.1f} mmol/L** — "
                             f"{sv1_block_verdict(la_i)}",
                             f"FC moy. {fc_i:.0f} bpm"]
@@ -648,17 +810,28 @@ elif tool == "sv1":
                                     f"({p_i / weight_of(n):.1f} W/kg)")
                     if km_i:
                         bits.append(f"{km_i:.1f} km")
+                    if tm_i:
+                        bits.append(f"{tm_i:.1f} min")
+                    if dev_i:
+                        bits.append(f"appareil n°{dev_i}")
                     if rpe_i:
                         bits.append(f"RPE {rpe_i:.0f}/10")
+                    if tm_i and abs(tm_i - 15.0) >= 1.0:
+                        st.caption("🟠 Bloc mal géré : " +
+                                   ("trop court — " if tm_i < 15.0
+                                    else "trop long — " )
+                                   + f"{tm_i:.1f} min au lieu de 15'")
+                    if cmt_i:
+                        st.caption(f"💬 {cmt_i}")
                     st.markdown(f"**Bloc {i + 1}** : " + " · ".join(bits))
                     if _trow is not None:
-                        lo_f = _num(_trow.get("FC basse"))
-                        hi_f = _num(_trow.get("FC haute"))
+                        lo_f = _num(_trow.get("FC plancher"))
+                        hi_f = _num(_trow.get("FC plafond"))
                         if lo_f and hi_f and not (lo_f - 3 <= fc_i <= hi_f + 2):
                             st.caption("🟠 FC hors fenêtre cible "
                                        f"({lo_f:.0f}–{hi_f:.0f} bpm)")
-                        pl = _num(_trow.get("P basse (W)"))
-                        ph = _num(_trow.get("P haute (W)"))
+                        pl = _num(_trow.get("Plancher (W)"))
+                        ph = _num(_trow.get("Plafond (W)"))
                         if pv_al := _num(p_i):
                             if pl and ph and not (pl - 12 <= pv_al <= ph + 12):
                                 st.caption("🟠 Puissance hors fenêtre cible "
@@ -689,6 +862,9 @@ elif tool == "sv1":
                             "P moy. B1 (W)": _bmean("p", 0),
                             "P moy. B2 (W)": _bmean("p", 1),
                             "P moy. B3 (W)": _bmean("p", 2),
+                            "Temps moy. B1 (min)": _bmean("tm", 0),
+                            "Temps moy. B2 (min)": _bmean("tm", 1),
+                            "Temps moy. B3 (min)": _bmean("tm", 2),
                             "RPE moy.": _bmean("rpe", 2),
                             "Dérive moy.": round(float((las[:, 2] - las[:, 0]).mean()), 2),
                             "Bloc(s) ≥ 4": int((las >= 4.0).sum()),
@@ -725,6 +901,18 @@ elif tool == "sv1":
                                               "Distance B1 (km)": (data[n].get("km") or [None] * 3)[0],
                                               "Distance B2 (km)": (data[n].get("km") or [None] * 3)[1],
                                               "Distance B3 (km)": (data[n].get("km") or [None] * 3)[2],
+                                              "Lactate sec. B1": (data[n].get("la_sec") or [None] * 3)[0],
+                                              "Lactate sec. B2": (data[n].get("la_sec") or [None] * 3)[1],
+                                              "Lactate sec. B3": (data[n].get("la_sec") or [None] * 3)[2],
+                                              "Temps réel B1 (min)": (data[n].get("tm") or [None] * 3)[0],
+                                              "Temps réel B2 (min)": (data[n].get("tm") or [None] * 3)[1],
+                                              "Temps réel B3 (min)": (data[n].get("tm") or [None] * 3)[2],
+                                              "Appareil B1": (data[n].get("dev") or ["", "", ""])[0],
+                                              "Appareil B2": (data[n].get("dev") or ["", "", ""])[1],
+                                              "Appareil B3": (data[n].get("dev") or ["", "", ""])[2],
+                                              "Commentaire B1": (data[n].get("cmt") or ["", "", ""])[0],
+                                              "Commentaire B2": (data[n].get("cmt") or ["", "", ""])[1],
+                                              "Commentaire B3": (data[n].get("cmt") or ["", "", ""])[2],
                                               "RPE B1": (data[n].get("rpe") or [None] * 3)[0],
                                               "RPE B2": (data[n].get("rpe") or [None] * 3)[1],
                                               "RPE B3": (data[n].get("rpe") or [None] * 3)[2],
@@ -773,14 +961,24 @@ elif tool == "field":
             if not p:
                 continue
             fc = _num(r0.get("FC moy. (bpm)"))
-            la = _num(r0.get("Lactate (mmol/L)"))
+            # Multi-pricks : 1 à 3 lactates par palier — on retient la MÉDIANE
+            # (si tendance douteuse sur une piqûre, elle ne fausse plus le seuil).
+            _lvs = [x for x in (_num(r0.get("Lactate (mmol/L)")),
+                                _num(r0.get("Lactate 2 (mmol/L)")),
+                                _num(r0.get("Lactate 3 (mmol/L)")))
+                    if x is not None]
+            la = (float(np.median(_lvs)) if _lvs else None)
             dur = _num(r0.get("Durée (min)"))
             rpe = _num(r0.get("RPE (/10)"))
             prv = rev_power(p, fc, _num(ft.get("fcmax")))
             paliers_raw.append({"Palier": i + 1, "Durée (min)": dur,
                                 "P moy. (W)": p, "FC moy. (bpm)": fc,
-                                "Lactate (mmol/L)": la, "RPE": rpe,
-                                "P révisée (W)": prv})
+                                "Lactate (mmol/L)": la,
+                                "Lactates saisis": " + ".join(f"{v:.1f}" for v in _lvs)
+                                if len(_lvs) > 1 else "",
+                                "RPE": rpe,
+                                "P révisée (W)": prv,
+                                "Commentaire": str(r0.get("Commentaire") or "")})
         if len([r for r in paliers_raw if r["Lactate (mmol/L)"] is not None]) < 2:
             return {"error": "moins de 2 lactates saisis — seuils impossibles"}
         paliers_raw.sort(key=lambda r: (r["P révisée (W)"] or r["P moy. (W)"]))
@@ -863,6 +1061,44 @@ elif tool == "field":
                           legend=dict(orientation="h", yanchor="bottom",
                                       y=1.02, xanchor="right", x=1))
         n_susp = sum(1 for r in paliers_raw if r["_niveau"])
+        # ── Lecture automatique — le rapport se commente tout seul ─────
+        lecture = []
+        _lrep = _num(ft.get("la_repos"))
+        if _lrep and _lrep > 2.0:
+            lecture.append(
+                f"Lactate de repos élevé ({_lrep:.1f} mmol/L) — à refaire "
+                "à froid un matin : si ça persiste, alléger 2–3 jours.")
+        if p_sv1:
+            lecture.append(
+                f"SV1 ≈ {p_sv1:.0f} W (équipe : allure d'endurance fondamentale "
+                "— parler en marchant avec facilité).")
+        else:
+            lecture.append(
+                "SV1 non trouvé — il faut au moins 2 paliers faciles avec "
+                "lactate qui monte doucement ; complète les piqûres des "
+                "paliers bas.")
+        if p_sv2 and p_sv1:
+            lecture.append(
+                f"SV2 ≈ {p_sv2:.0f} W (OBLA 4 mmol/L, allure seuil dure) — "
+                f"écart SV1→SV2 : {p_sv2 - p_sv1:.0f} W "
+                f"({(p_sv2 / max(p_sv1, 1.0) - 1.0) * 100:.0f} %).")
+        else:
+            lecture.append(
+                "SV2 non calculé (4 mmol/L non atteint) — ajoute un dernier "
+                "palier plus dur ou plus long ; c'est ce palier haut qui "
+                "apporte le plus d'info quand SV1 est déjà couvert.")
+        if revs and la_max is not None:
+            _last_p = max(r for r in revs if r)
+            if la_max >= 8.0:
+                lecture.append(
+                    f"Dernier palier à {_last_p:.0f} W avec {la_max:.1f} "
+                    "mmol/L — très au-delà du seuil : excellent repère de "
+                    "P max aérobie (comparer d'un test à l'autre).")
+        if n_susp:
+            lecture.append(
+                f"{n_susp} palier(s) coloré(s) en suspect — relis les "
+                "commentaires : une piqûre douteuse est à refaire "
+                "(médiane utilisée si 2–3 mesures).")
         return {"error": None, "group": grp, "date": str(ft.get("date") or ""),
                 "lieu": str(ft.get("lieu") or ""),
                 "fcmax": _num(ft.get("fcmax")), "poids": _num(ft.get("poids")),
@@ -875,6 +1111,7 @@ elif tool == "field":
                 "p_rev_max": max(revs) if revs else None,
                 "wkg_max": max(wkgs) if wkgs else None,
                 "la_max": max(las) if las else None,
+                "lecture": lecture,
                 "zones_w": zw, "zones_hr": zh, "fig": fig, "n_suspects": n_susp}
 
     st.subheader("🩸 Test lactate de terrain — paliers sur le même terrain")
@@ -890,17 +1127,47 @@ elif tool == "field":
     _fmeth = st.radio("Méthode SV1", list(SV1_METHODS.keys()),
                       key="field_sv1_method", horizontal=True)
 
+    _FIELD_EDIT_KEYS = ("field_date", "field_lieu", "field_fcmax",
+                        "field_kg", "field_lrep", "field_paliers_ed")
     opts = list(sel) + [n for n in fdata if n not in sel]
-    field_rider = st.selectbox("Coureur à saisir / modifier", opts,
-                               key="field_rider")
+    if not opts:
+        st.info("Sélectionne d'abord les coureurs du test en haut de la page.")
+        st.stop()
+    try:
+        field_rider = st.pills("Coureur à saisir — un clic suffit",
+                               opts, key="field_rider",
+                               default=[opts[0]],
+                               help="Si plusieurs coureurs se pointent en "
+                                    "même temps, passe de l'un à l'autre en "
+                                    "un clic : les modifs non enregistrées "
+                                    "d'un coureur ne touchent jamais l'autre.")
+    except Exception:
+        field_rider = st.selectbox("Coureur à saisir / modifier", opts,
+                                   key="field_rider")
+    if not field_rider:
+        field_rider = opts[0]
+    # Cloisonnement : si le coureur courant a changé depuis le run précédent
+    # (clic, suppression, arrivée), on jette les éditions non enregistrées
+    # de l'ancien coureur — elles ne peuvent plus fuir dans sa sauvegarde,
+    # ni dans le rapport d'un autre.
+    _prev_f = st.session_state.get("field_rider_prev")
+    if _prev_f is not None and _prev_f != field_rider:
+        for _k in _FIELD_EDIT_KEYS:
+            st.session_state.pop(_k, None)
+    st.session_state["field_rider_prev"] = field_rider
 
     ft = fdata.get(field_rider, {})
     _pals_prev = ft.get("paliers")
+    _FIELD_COLS = ["Durée (min)", "P moy. (W)", "FC moy. (bpm)",
+                   "Lactate (mmol/L)", "Lactate 2 (mmol/L)",
+                   "Lactate 3 (mmol/L)", "RPE (/10)", "Commentaire"]
     if not isinstance(_pals_prev, pd.DataFrame) or _pals_prev.empty:
         _pals_prev = pd.DataFrame({
             "Durée (min)": [4.0, 4.0, 4.0, 4.0],
             "P moy. (W)": [None] * 4, "FC moy. (bpm)": [None] * 4,
-            "Lactate (mmol/L)": [None] * 4, "RPE (/10)": [None] * 4})
+            "Lactate (mmol/L)": [None] * 4, "Lactate 2 (mmol/L)": [None] * 4,
+            "Lactate 3 (mmol/L)": [None] * 4, "RPE (/10)": [None] * 4,
+            "Commentaire": [""] * 4})
     try:
         with st.form("field_form", clear_on_submit=False):
             hc1, hc2, hc3, hc4, hc5 = st.columns(5)
@@ -915,13 +1182,16 @@ elif tool == "field":
             _lrep_v = _num(ft.get("la_repos")) or 0.8
             f_lrep = hc5.number_input("Lactate repos (mmol/L)", 0.0, 20.0,
                                       float(_lrep_v), 0.1, format="%.1f")
-            st.markdown("**Paliers** — 1 ligne = 1 effort, de plus en plus fort. "
-                        "Ils sont triés par puissance pour l'analyse.")
+            st.markdown(
+                "**Paliers** — 1 ligne = 1 effort, de plus en plus fort. Ils "
+                "sont triés par puissance pour l'analyse. Doute sur une "
+                "piqûre ? saisis 2 ou 3 lactates (1, 2, 3) : l'analyse "
+                "retient la **médiane** — une pique ratée ne fausse plus le "
+                "seuil. Note le pourquoi en commentaire, il suit le palier "
+                "jusqu'au rapport.")
             pals = st.data_editor(
-                _pals_prev.reindex(columns=["Durée (min)", "P moy. (W)",
-                                            "FC moy. (bpm)", "Lactate (mmol/L)",
-                                            "RPE (/10)"]),
-                key=f"field_paliers_{abs(hash(field_rider)) % 10 ** 8}",
+                _pals_prev.reindex(columns=_FIELD_COLS),
+                key="field_paliers_ed",
                 hide_index=True, use_container_width=True, num_rows="dynamic",
                 column_config={
                     "Durée (min)": st.column_config.NumberColumn(
@@ -931,11 +1201,24 @@ elif tool == "field":
                     "FC moy. (bpm)": st.column_config.NumberColumn(
                         "FC moy. (bpm)", min_value=80, max_value=230, step=1),
                     "Lactate (mmol/L)": st.column_config.NumberColumn(
-                        "Lactate (mmol/L)", min_value=0.0, max_value=20.0, step=0.1,
-                        format="%.1f"),
+                        "Lactate 1 (mmol/L)", min_value=0.0, max_value=20.0,
+                        step=0.1, format="%.1f",
+                        help="Première mesure (obligatoire pour l'analyse)."),
+                    "Lactate 2 (mmol/L)": st.column_config.NumberColumn(
+                        "Lactate 2", min_value=0.0, max_value=20.0, step=0.1,
+                        format="%.1f",
+                        help="Deuxième mesure si doute — médiane utilisée."),
+                    "Lactate 3 (mmol/L)": st.column_config.NumberColumn(
+                        "Lactate 3", min_value=0.0, max_value=20.0, step=0.1,
+                        format="%.1f",
+                        help="Troisième mesure si doute — médiane utilisée."),
                     "RPE (/10)": st.column_config.NumberColumn(
                         "RPE (/10)", min_value=0.0, max_value=10.0, step=0.5,
                         format="%.1f"),
+                    "Commentaire": st.column_config.TextColumn(
+                        "Commentaire",
+                        help="Ex. « pique 2 douteuse », « vent », « jambe "
+                             "lourde » — rappelé dans le rapport et l'export."),
                 })
             saved_ft = st.form_submit_button(
                 f"💾 Enregistrer le test de {field_rider}")
@@ -945,11 +1228,13 @@ elif tool == "field":
     if saved_ft:
         fdata[field_rider] = {"date": f_date, "lieu": f_lieu, "fcmax": f_fcmax,
                               "poids": f_kg, "la_repos": f_lrep,
-                              "paliers": pals,
+                              "paliers": pals.copy()
+                              if isinstance(pals, pd.DataFrame) else pals,
                               "group": group_of.get(field_rider, "—")}
         st.session_state["field_report"] = {}
         st.success(f"Test de {field_rider} enregistré — paliers triés par "
-                   "puissance pour l'analyse.")
+                   "puissance pour l'analyse ; les éditions non enregistrées "
+                   "d'un autre coureur ne sont jamais reprises.")
 
     _entered_f = [n for n in fdata if isinstance(fdata[n].get("paliers"),
                                                  pd.DataFrame)]
@@ -959,6 +1244,11 @@ elif tool == "field":
         if st.button("♻️ Retirer ces tests", key="field_rm_btn") and _rem:
             for _nm in _rem:
                 fdata.pop(_nm, None)
+            # purge aussi le formulaire en cours : rien de leurs éditions ne
+            # doit resservir (c'était la fuite du bug des lignes aberrantes)
+            for _k in _FIELD_EDIT_KEYS:
+                st.session_state.pop(_k, None)
+            st.session_state.pop("field_rider_prev", None)
             st.session_state["field_report"] = {}
             st.rerun()
 
@@ -967,8 +1257,11 @@ elif tool == "field":
         st.session_state["field_report"] = {}
         with st.spinner("Analyse de tous les tests…"):
             for _n in _entered_f:
-                _ready = sum(1 for _, _r in fdata[_n]["paliers"].iterrows()
-                             if _num(_r.get("Lactate (mmol/L)")))
+                _ready = sum(
+                    1 for _, _r in fdata[_n]["paliers"].iterrows()
+                    if any(_num(_r.get(c)) for c in ("Lactate (mmol/L)",
+                                                     "Lactate 2 (mmol/L)",
+                                                     "Lactate 3 (mmol/L)")))
                 if _ready < 2:
                     st.session_state["field_report"][_n] = {
                         "error": "moins de 2 lactates saisis — seuils impossibles"}
@@ -1006,6 +1299,10 @@ elif tool == "field":
                       f"{rep['la_max']:.1f} mmol max" if rep["la_max"] else None)
             k4.metric("P max test", _fmt(rep["p_rev_max"], 0, " W"),
                       _fmt(rep["wkg_max"], 2, " W/kg"))
+            if rep.get("lecture"):
+                st.markdown("**📖 Lecture automatique**")
+                for _l in rep["lecture"]:
+                    st.markdown(f"- {_l}")
             dfv = pd.DataFrame(rep["paliers"])
             st.dataframe(dfv.style.apply(_palette, axis=1).hide(axis="index"),
                          use_container_width=True)
@@ -1121,7 +1418,10 @@ elif tool == "field":
                      "Palier": p["Palier"], "Durée (min)": p["Durée (min)"],
                      "P moy. (W)": p["P moy. (W)"],
                      "FC moy. (bpm)": p["FC moy. (bpm)"],
-                     "Lactate (mmol/L)": p["Lactate (mmol/L)"], "RPE": p["RPE"],
+                     "Lactate (mmol/L)": p["Lactate (mmol/L)"],
+                     "Lactates saisis": p.get("Lactates saisis", ""),
+                     "RPE": p["RPE"],
+                     "Commentaire": p.get("Commentaire", ""),
                      "P révisée (W)": _round0(p["P révisée (W)"]),
                      "W/kg (révisée)": p.get("W/kg"),
                      "⚠️ Suspect": p["⚠️ Suspect"]}
@@ -1262,6 +1562,68 @@ elif tool == "cp":
                      use_container_width=True)
 
         st.subheader("Zones d'entraînement par coureur")
+
+        def _pct_df(default_pcts, key):
+            if not isinstance(st.session_state.get(key), pd.DataFrame):
+                st.session_state[key] = pd.DataFrame(
+                    [{"Zone": lbl,
+                      "Bas (%)": None if lo is None else round(lo * 100),
+                      "Haut (%)": None if hi is None else round(hi * 100)}
+                     for lbl, lo, hi in default_pcts])
+            return st.session_state[key]
+
+        with st.expander("🎛️ Régler les % des zones — selon le niveau ou le profil"):
+            st.caption("Puissance : % de CP. FC : % de la FC au seuil (≈ FC moy. 20′). "
+                       "Vide ou 0 = borne ouverte. Appliqué à tous les coureurs — "
+                       "les % affichés sous « Zones » suivent toujours ces réglages.")
+            _edw = st.data_editor(_pct_df(CP_ZONE_PCTS, "cp_pct_base_w"),
+                                  key="cp_zone_pct_ed_w", hide_index=True,
+                                  use_container_width=True, num_rows="fixed",
+                                  column_config={
+                                      "Zone": st.column_config.TextColumn(
+                                          "Zone", disabled=True),
+                                      "Bas (%)": st.column_config.NumberColumn(
+                                          min_value=0, max_value=300, step=1),
+                                      "Haut (%)": st.column_config.NumberColumn(
+                                          min_value=0, max_value=300, step=1)})
+            _edf = st.data_editor(_pct_df(FC_ZONE_PCTS, "cp_pct_base_f"),
+                                  key="cp_zone_pct_ed_f", hide_index=True,
+                                  use_container_width=True, num_rows="fixed",
+                                  column_config={
+                                      "Zone": st.column_config.TextColumn(
+                                          "Zone", disabled=True),
+                                      "Bas (%)": st.column_config.NumberColumn(
+                                          min_value=0, max_value=300, step=1),
+                                      "Haut (%)": st.column_config.NumberColumn(
+                                          min_value=0, max_value=300, step=1)})
+            _zr1, _zr2 = st.columns(2)
+            if _zr1.button("↩️ Watts : % standards", key="cp_pct_reset_w"):
+                for _k in ("cp_zone_pct_ed_w", "cp_pct_base_w"):
+                    st.session_state.pop(_k, None)
+                st.rerun()
+            if _zr2.button("↩️ FC : % standards", key="cp_pct_reset_f"):
+                for _k in ("cp_zone_pct_ed_f", "cp_pct_base_f"):
+                    st.session_state.pop(_k, None)
+                st.rerun()
+
+        def _to_pcts(edf, fallback):
+            if not isinstance(edf, pd.DataFrame) or edf.empty:
+                return list(fallback)
+            out = []
+            for i, (lbl, _lo, _hi) in enumerate(fallback):
+                if i < len(edf):
+                    _r = edf.iloc[i]
+                    lo = _num(_r.get("Bas (%)"))
+                    hi = _num(_r.get("Haut (%)"))
+                    out.append((lbl,
+                                lo / 100.0 if lo else None,
+                                hi / 100.0 if hi else None))
+                else:
+                    out.append(fallback[i])
+            return out
+
+        _pct_w = _to_pcts(st.session_state.get("cp_zone_pct_ed_w"), CP_ZONE_PCTS)
+        _pct_f = _to_pcts(st.session_state.get("cp_zone_pct_ed_f"), FC_ZONE_PCTS)
         for _, row in cdisp.iterrows():
             cp = _num(row["CP (W)"])
             if not cp:
@@ -1270,35 +1632,62 @@ elif tool == "cp":
             with st.expander(f"{row['Nom']} — {row['Groupe']} · CP {cp:.0f} W"
                              + (f" ({row['CP (W/kg)']:.2f} W/kg)"
                                 if row["CP (W/kg)"] else "")):
-                zrows = []
-                for (lbl, lo_pct, hi_pct), (_, lo, hi) in zip(
-                        CP_ZONE_PCTS, cp_zone_table(cp)):
-                    zrows.append({
-                        "Zone": lbl,
-                        "Bas (W)": round(lo) if lo else "—",
-                        "Haut (W)": round(hi) if hi else "ouvert",
-                        "Bas (bpm)": round(lo_pct * fc20) if (lo_pct and fc20) else "—",
-                        "Haut (bpm)": round(hi_pct * fc20) if (hi_pct and fc20) else
-                        ("ouvert" if hi_pct is None and fc20 else "—")})
-                st.dataframe(pd.DataFrame(zrows), hide_index=True,
-                             use_container_width=True)
-                if fc20:
-                    st.caption("Zones FC en % de la FC au seuil (≈ FC moy. 20′) — "
-                               "ajuste si tu connais la FCmax du coureur.")
+                zw = cp_zone_table(cp, _pct_w)
+                zf = fc_zone_table(fc20, _pct_f) if fc20 else None
+                cza, czb = st.columns(2)
+                with cza:
+                    st.markdown("**Zones puissance**")
+                    if zw:
+                        st.dataframe(pd.DataFrame(
+                            [{"Zone": lbl,
+                              "% bas": "ouvert" if lp is None else f"{lp * 100:.0f} %",
+                              "% haut": "ouvert" if hp is None else f"{hp * 100:.0f} %",
+                              "Bas (W)": round(lo) if lo else "—",
+                              "Haut (W)": round(hi) if hi else "ouvert"}
+                             for (lbl, lp, hp), (_, lo, hi) in zip(_pct_w, zw)]),
+                            hide_index=True, use_container_width=True)
+                    else:
+                        st.info("CP indisponible.")
+                with czb:
+                    st.markdown("**Zones fréquence cardiaque**")
+                    if zf:
+                        st.dataframe(pd.DataFrame(
+                            [{"Zone": lbl,
+                              "% bas": "ouvert" if lp is None else f"{lp * 100:.0f} %",
+                              "% haut": "ouvert" if hp is None else f"{hp * 100:.0f} %",
+                              "Bas (bpm)": round(lo) if lo else "—",
+                              "Haut (bpm)": round(hi) if hi else "ouvert"}
+                             for (lbl, lp, hp), (_, lo, hi) in zip(_pct_f, zf)]),
+                            hide_index=True, use_container_width=True)
+                    else:
+                        st.info("FC 20′ manquante — zones FC indisponibles.")
+                st.caption("Watts : % de CP · FC : % de la FC au seuil (≈ FC moy. 20′) "
+                           "— % réglables dans l'onglet 🎛️ ci-dessus.")
 
         st.subheader("CP (W/kg) par coureur")
-        bar_df = cdisp[cdisp["CP (W/kg)"].notna()].sort_values(
-            "CP (W/kg)", ascending=False)
+        bar_df = cdisp[cdisp["CP (W/kg)"].notna()].sort_values("CP (W/kg)")
         if not bar_df.empty:
             GROUP_COLORS = {"WT Hommes": "#dc2626", "WT Femmes": "#db2777",
                             "Conti Hommes": "#2563eb", "Conti Femmes": "#16a34a"}
             fig = go.Figure()
             for g in sorted(bar_df["Groupe"].unique()):
                 sub = bar_df[bar_df["Groupe"] == g]
-                fig.add_trace(go.Bar(x=sub["Nom"], y=sub["CP (W/kg)"], name=g,
-                                     marker_color=GROUP_COLORS.get(g, "#64748b")))
-            fig.update_layout(template="plotly_white", barmode="group", height=340,
-                              yaxis_title="CP (W/kg)",
+                fig.add_trace(go.Bar(
+                    y=sub["Nom"], x=sub["CP (W/kg)"], name=g, orientation="h",
+                    marker_color=GROUP_COLORS.get(g, "#64748b"),
+                    text=[f"{v:.2f}" for v in sub["CP (W/kg)"]],
+                    textposition="outside", cliponaxis=False,
+                    customdata=sub[["P 5′ (W)", "P 20′ (W)", "CP (W)",
+                                    "Poids (kg)"]].fillna("—"),
+                    hovertemplate="%{y} — %{customdata[2]} W (%{customdata[3]} kg)"
+                                  "<br>5′ %{customdata[0]} W · 20′ "
+                                  "%{customdata[1]} W<extra></extra>"))
+            _mean = float(bar_df["CP (W/kg)"].mean())
+            fig.add_vline(x=_mean, line_dash="dot", line_color="#64748b",
+                          annotation_text=f"Équipe : {_mean:.2f} W/kg")
+            fig.update_layout(template="plotly_white",
+                              height=max(320, 46 * len(bar_df) + 120),
+                              xaxis_title="CP (W/kg)",
                               legend=dict(orientation="h", yanchor="bottom", y=1.02,
                                           xanchor="right", x=1))
             st.plotly_chart(fig, use_container_width=True)
